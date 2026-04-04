@@ -3,18 +3,27 @@ package main
 import "fmt"
 
 func main() {
-	token, err := initCentralSession(".env")
+	config, err := loadProjectConfig("central_config.yaml")
 	if err != nil {
-		fmt.Println("Central session error:", err)
+		fmt.Println("Configuration error:", err)
 		return
 	}
 
-	fmt.Println("Central session successfully created")
-	fmt.Println("Token received :", token != "")
-
-	err = testCentralProjects(".env", token)
-	if err != nil {
-		fmt.Println("Central API error projects:", err)
+	if len(config.Projects) == 0 {
+		fmt.Println("No project mapping found")
 		return
 	}
+
+	project := config.Projects[0]
+
+	fmt.Printf("Testing database connection for project %d (%s)\n", project.ProjectID, project.ProjectName)
+
+	db, err := connectProjectDatabase(".env", project.DatabaseName)
+	if err != nil {
+		fmt.Println("Database connection error:", err)
+		return
+	}
+	defer db.Close()
+
+	fmt.Println("PostgreSQL connection successful")
 }

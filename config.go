@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
+
+type ProjectMapping struct {
+	ProjectID    int    `yaml:"project_id"`
+	ProjectName  string `yaml:"project_name"`
+	DatabaseName string `yaml:"database_name"`
+}
+
+type ProjectConfig struct {
+	Projects []ProjectMapping `yaml:"projects"`
+}
 
 func loadEnvFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("impossible to open %s: %w", path, err)
+		return fmt.Errorf("failed to open %s: %w", path, err)
 	}
 	defer file.Close()
 
@@ -27,23 +39,35 @@ func loadEnvFile(path string) error {
 
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("invalid line %d in %s", lineNumber, path)
+			return fmt.Errorf("invalid line in %s at line %d", path, lineNumber)
 		}
 
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-
 		value = strings.Trim(value, `"'`)
 
-		err := os.Setenv(key, value)
-		if err != nil {
-			return fmt.Errorf("impossible to define the variable %s: %w", key, err)
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("failed to set environment variable %s: %w", key, err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading %s: %w", path, err)
+		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	return nil
+}
+
+func loadProjectConfig(path string) (*ProjectConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read YAML config file: %w", err)
+	}
+
+	var config ProjectConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML config file: %w", err)
+	}
+
+	return &config, nil
 }
