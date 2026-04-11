@@ -3,6 +3,12 @@ package main
 import "fmt"
 
 func main() {
+	err := loadEnvFile(".env")
+	if err != nil {
+		fmt.Println("Environment error:", err)
+		return
+	}
+
 	config, err := loadProjectConfig("central_config.yaml")
 	if err != nil {
 		fmt.Println("Configuration error:", err)
@@ -14,16 +20,66 @@ func main() {
 		return
 	}
 
+	centralURL, err := getRequiredEnv("ODK_CENTRAL_URL")
+	if err != nil {
+		fmt.Println("Environment error:", err)
+		return
+	}
+
+	token, err := initCentralSession()
+	if err != nil {
+		fmt.Println("Central session error:", err)
+		return
+	}
+
 	project := config.Projects[0]
+	datasetsToSync := getDatasetsToSync(project)
 
-	fmt.Printf("Testing database connection for project %d (%s)\n", project.ProjectID, project.ProjectName)
+	if len(datasetsToSync) == 0 {
+		fmt.Println("No dataset to sync")
+		return
+	}
 
-	db, err := connectProjectDatabase(".env", project.DatabaseName)
+	dataset := datasetsToSync[0]
+
+	fmt.Printf(
+		"Preparing dataset table for project %d (%s), dataset %s -> table %s\n",
+		project.ProjectID,
+		project.ProjectName,
+		dataset.Name,
+		dataset.TableName,
+	)
+
+	db, err := connectProjectDatabase(project.DatabaseName)
 	if err != nil {
 		fmt.Println("Database connection error:", err)
 		return
 	}
 	defer db.Close()
 
-	fmt.Println("PostgreSQL connection successful")
+	err = requireSchema(db, datasetSchema)
+	if err != nil {
+		fmt.Println("Schema error:", err)
+		return
+	}
+
+	metadata, err := getDatasetMetadata(centralURL, token, project.ProjectID, dataset.Name)
+	if err != nil {
+		fmt.Println("Dataset metadata error:", err)
+		return
+	}
+
+	err = ensureDatasetTableExists(db, dataset.TableName)
+	if err != nil {
+		fmt.Println("Table error:", err)
+		return
+	}
+
+	err = ensureDatasetColumnsExist(db, dataset.TableName, metadata.Properties)
+	if err != nil {
+		fmt.Println("Column error:", err)
+		return
+	}
+
+	fmt.Printf("Dataset table %s.%s is ready\n", datasetSchema, dataset.TableName)
 }

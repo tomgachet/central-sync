@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -20,24 +19,20 @@ type sessionResponse struct {
 	Expires string `json:"expiresAt"`
 }
 
-func initCentralSession(envPath string) (string, error) {
-	err := loadEnvFile(envPath)
+func initCentralSession() (string, error) {
+	centralURL, err := getRequiredEnv("ODK_CENTRAL_URL")
 	if err != nil {
-		return "", fmt.Errorf("loading error .env: %w", err)
+		return "", err
 	}
 
-	centralURL := os.Getenv("ODK_CENTRAL_URL")
-	email := os.Getenv("ODK_CENTRAL_USER_EMAIL")
-	password := os.Getenv("ODK_CENTRAL_USER_PASSWORD")
+	email, err := getRequiredEnv("ODK_CENTRAL_USER_EMAIL")
+	if err != nil {
+		return "", err
+	}
 
-	if centralURL == "" {
-		return "", fmt.Errorf("ODK_CENTRAL_URL manquant")
-	}
-	if email == "" {
-		return "", fmt.Errorf("ODK_CENTRAL_USER_EMAIL manquant")
-	}
-	if password == "" {
-		return "", fmt.Errorf("ODK_CENTRAL_USER_PASSWORD manquant")
+	password, err := getRequiredEnv("ODK_CENTRAL_USER_PASSWORD")
+	if err != nil {
+		return "", err
 	}
 
 	token, err := createCentralSession(centralURL, email, password)
@@ -56,13 +51,13 @@ func createCentralSession(centralURL, email, password string) (string, error) {
 
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("JSON encoding error: %w", err)
+		return "", fmt.Errorf("failed to encode session payload: %w", err)
 	}
 
 	url := centralURL + "/v1/sessions"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("session request creation error: %w", err)
+		return "", fmt.Errorf("failed to create session request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -74,13 +69,13 @@ func createCentralSession(centralURL, email, password string) (string, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("session call error: %w", err)
+		return "", fmt.Errorf("failed to call session endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("error read response session: %w", err)
+		return "", fmt.Errorf("failed to read session response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -89,11 +84,11 @@ func createCentralSession(centralURL, email, password string) (string, error) {
 
 	var session sessionResponse
 	if err := json.Unmarshal(respBody, &session); err != nil {
-		return "", fmt.Errorf("session decoding error: %w", err)
+		return "", fmt.Errorf("failed to decode session response: %w", err)
 	}
 
 	if session.Token == "" {
-		return "", fmt.Errorf("empty token in the response")
+		return "", fmt.Errorf("empty token in session response")
 	}
 
 	return session.Token, nil

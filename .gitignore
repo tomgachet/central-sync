@@ -1,3 +1,4 @@
 central-sync
 .env
+central_config.yaml
 *.log

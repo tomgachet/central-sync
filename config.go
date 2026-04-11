@@ -9,10 +9,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type DatasetMapping struct {
+	Name      string `yaml:"name"`
+	TableName string `yaml:"table_name"`
+	Sync      bool   `yaml:"sync"`
+}
+
 type ProjectMapping struct {
 	ProjectID    int    `yaml:"project_id"`
 	ProjectName  string `yaml:"project_name"`
 	DatabaseName string `yaml:"database_name"`
+	Datasets     []DatasetMapping `yaml:"datasets"`
 }
 
 type ProjectConfig struct {
@@ -70,4 +77,25 @@ func loadProjectConfig(path string) (*ProjectConfig, error) {
 	}
 
 	return &config, nil
+}
+
+func getDatasetsToSync(project ProjectMapping) []DatasetMapping {
+	var datasetsToSync []DatasetMapping
+
+	for _, dataset := range project.Datasets {
+		if dataset.Sync {
+			datasetsToSync = append(datasetsToSync, dataset)
+		}
+	}
+
+	return datasetsToSync
+}
+
+func getRequiredEnv(key string) (string, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return "", fmt.Errorf("missing %s", key)
+	}
+
+	return value, nil
 }

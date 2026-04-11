@@ -1,8 +1,0 @@
-projects:
-  - project_id: 1
-    project_name: "Bac a sable"
-    database_name: "sandbox"
-
-  - project_id: 2
-    project_name: "Production"
-    database_name: "odk_production"
