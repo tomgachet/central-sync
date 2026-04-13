@@ -26,10 +26,10 @@ func main() {
 		return
 	}
 
-	token, err := initCentralSession()
+	token, err := getValidCentralToken()
 	if err != nil {
-		fmt.Println("Central session error:", err)
-		return
+	fmt.Println("Central token error:", err)
+	return
 	}
 
 	project := config.Projects[0]

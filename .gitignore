@@ -1,4 +1,5 @@
 central-sync
 .env
 central_config.yaml
+central_session.json
 *.log
