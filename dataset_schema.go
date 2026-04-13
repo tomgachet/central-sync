@@ -11,6 +11,7 @@ func ensureDatasetTableExists(db DBExecutor, tableName string) error {
 			entity_uuid TEXT PRIMARY KEY,
 			label TEXT,
 			data_json JSONB,
+			geometry_geojson JSONB,
 			central_created_at TIMESTAMPTZ,
 			central_updated_at TIMESTAMPTZ,
 			central_deleted_at TIMESTAMPTZ,
@@ -34,12 +35,13 @@ func ensureDatasetTableExists(db DBExecutor, tableName string) error {
 
 func ensureTechnicalColumnsExist(db DBExecutor, tableName string) error {
 	technicalColumns := map[string]string{
+		"label":              "TEXT",
+		"data_json":          "JSONB",
+		"geometry_geojson":   "JSONB",
 		"central_created_at": "TIMESTAMPTZ",
 		"central_updated_at": "TIMESTAMPTZ",
 		"central_deleted_at": "TIMESTAMPTZ",
 		"central_version":    "INT",
-		"label":              "TEXT",
-		"data_json":          "JSONB",
 		"synced_at":          "TIMESTAMPTZ",
 	}
 
@@ -162,6 +164,7 @@ func isReservedTechnicalColumn(columnName string) bool {
 		"entity_uuid":        true,
 		"label":              true,
 		"data_json":          true,
+		"geometry_geojson":   true,
 		"central_created_at": true,
 		"central_updated_at": true,
 		"central_deleted_at": true,

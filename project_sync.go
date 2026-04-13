@@ -85,7 +85,14 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
 	}
 
-	err = syncDatasetEntities(db, dataset.TableName, entities, metadata.Properties)
+	geojsonCollection, err := getDatasetEntitiesGeoJSON(centralURL, token, project.ProjectID, dataset.Name)
+	if err != nil {
+		return fmt.Errorf("dataset GeoJSON error for dataset %s: %w", dataset.Name, err)
+	}
+
+	geometryGeoJSONByEntityID := buildGeometryGeoJSONMap(geojsonCollection)
+
+	err = syncDatasetEntities(db, dataset.TableName, entities, metadata.Properties, geometryGeoJSONByEntityID)
 	if err != nil {
 		return fmt.Errorf("entity sync error for dataset %s: %w", dataset.Name, err)
 	}

@@ -8,13 +8,19 @@ import (
 	"time"
 )
 
-func syncDatasetEntities(db DBExecutor, tableName string, entities []map[string]interface{}, properties []DatasetProperty) error {
+func syncDatasetEntities(
+	db DBExecutor,
+	tableName string,
+	entities []map[string]interface{},
+	properties []DatasetProperty,
+	geometryGeoJSONByEntityID map[string]interface{},
+) error {
 	insertedCount := 0
 	updatedCount := 0
 	skippedCount := 0
 
 	for _, entity := range entities {
-		action, err := upsertDatasetEntity(db, tableName, entity, properties)
+		action, err := upsertDatasetEntity(db, tableName, entity, properties, geometryGeoJSONByEntityID)
 		if err != nil {
 			return err
 		}
@@ -41,7 +47,13 @@ func syncDatasetEntities(db DBExecutor, tableName string, entities []map[string]
 	return nil
 }
 
-func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]interface{}, properties []DatasetProperty) (string, error) {
+func upsertDatasetEntity(
+	db DBExecutor,
+	tableName string,
+	entity map[string]interface{},
+	properties []DatasetProperty,
+	geometryGeoJSONByEntityID map[string]interface{},
+) (string, error) {
 	entityUUID, err := getEntityUUID(entity)
 	if err != nil {
 		return "", err
@@ -68,10 +80,16 @@ func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]inte
 		return "", fmt.Errorf("failed to marshal entity JSON: %w", err)
 	}
 
+	geometryGeoJSONValue, err := buildGeometryGeoJSONValue(geometryGeoJSONByEntityID, entityUUID)
+	if err != nil {
+		return "", err
+	}
+
 	columns := []string{
 		"entity_uuid",
 		"label",
 		"data_json",
+		"geometry_geojson",
 		"central_created_at",
 		"central_updated_at",
 		"central_deleted_at",
@@ -83,6 +101,7 @@ func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]inte
 		entityUUID,
 		label,
 		dataJSON,
+		geometryGeoJSONValue,
 		systemData.CreatedAt,
 		systemData.UpdatedAt,
 		systemData.DeletedAt,
@@ -93,6 +112,7 @@ func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]inte
 	updateAssignments := []string{
 		`"label" = EXCLUDED."label"`,
 		`"data_json" = EXCLUDED."data_json"`,
+		`"geometry_geojson" = EXCLUDED."geometry_geojson"`,
 		`"central_created_at" = EXCLUDED."central_created_at"`,
 		`"central_updated_at" = EXCLUDED."central_updated_at"`,
 		`"central_deleted_at" = EXCLUDED."central_deleted_at"`,
@@ -104,6 +124,7 @@ func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]inte
 		"entity_uuid":        true,
 		"label":              true,
 		"data_json":          true,
+		"geometry_geojson":   true,
 		"central_created_at": true,
 		"central_updated_at": true,
 		"central_deleted_at": true,
@@ -281,6 +302,20 @@ func getEntityPropertyValue(entity map[string]interface{}, key string) interface
 		}
 		return string(bytes)
 	}
+}
+
+func buildGeometryGeoJSONValue(geometryGeoJSONByEntityID map[string]interface{}, entityUUID string) ([]byte, error) {
+	raw, ok := geometryGeoJSONByEntityID[entityUUID]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+
+	geometryJSON, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal geometry GeoJSON for entity %s: %w", entityUUID, err)
+	}
+
+	return geometryJSON, nil
 }
 
 func extractOptionalTime(raw interface{}) (*time.Time, error) {
