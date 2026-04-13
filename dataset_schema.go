@@ -1,12 +1,11 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 )
 
-func ensureDatasetTableExists(db *sql.DB, tableName string) error {
+func ensureDatasetTableExists(db DBExecutor, tableName string) error {
 	query := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s.%s (
 			entity_uuid TEXT PRIMARY KEY,
@@ -33,7 +32,7 @@ func ensureDatasetTableExists(db *sql.DB, tableName string) error {
 	return nil
 }
 
-func ensureTechnicalColumnsExist(db *sql.DB, tableName string) error {
+func ensureTechnicalColumnsExist(db DBExecutor, tableName string) error {
 	technicalColumns := map[string]string{
 		"central_created_at": "TIMESTAMPTZ",
 		"central_updated_at": "TIMESTAMPTZ",
@@ -77,7 +76,7 @@ func ensureTechnicalColumnsExist(db *sql.DB, tableName string) error {
 	return nil
 }
 
-func ensureDatasetPropertyColumnsExist(db *sql.DB, tableName string, properties []DatasetProperty) error {
+func ensureDatasetPropertyColumnsExist(db DBExecutor, tableName string, properties []DatasetProperty) error {
 	for _, property := range properties {
 		columnName := property.ODataName
 		if columnName == "" {
@@ -102,7 +101,7 @@ func ensureDatasetPropertyColumnsExist(db *sql.DB, tableName string, properties 
 	return nil
 }
 
-func ensureDatasetPropertyColumnExists(db *sql.DB, tableName string, columnName string) error {
+func ensureDatasetPropertyColumnExists(db DBExecutor, tableName string, columnName string) error {
 	exists, err := columnExists(db, datasetSchema, tableName, columnName)
 	if err != nil {
 		return err
@@ -133,7 +132,7 @@ func ensureDatasetPropertyColumnExists(db *sql.DB, tableName string, columnName 
 	return nil
 }
 
-func columnExists(db *sql.DB, schemaName string, tableName string, columnName string) (bool, error) {
+func columnExists(db DBExecutor, schemaName string, tableName string, columnName string) (bool, error) {
 	const query = `
 		SELECT EXISTS (
 			SELECT 1

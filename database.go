@@ -8,6 +8,11 @@ import (
 	_ "github.com/lib/pq"
 )
 
+type DBExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
 const datasetSchema = "central_datasets"
 
 func connectProjectDatabase(databaseName string) (*sql.DB, error) {

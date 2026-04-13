@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 )
 
@@ -54,7 +53,7 @@ func syncProjectDatasets(project ProjectMapping, centralURL string, token string
 	return nil
 }
 
-func syncSingleDataset(db *sql.DB, project ProjectMapping, dataset DatasetMapping, centralURL string, token string) error {
+func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMapping, centralURL string, token string) error {
 	fmt.Printf(
 		"\nSyncing dataset %s -> table %s\n",
 		dataset.Name,

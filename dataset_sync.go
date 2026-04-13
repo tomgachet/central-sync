@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func syncDatasetEntities(db *sql.DB, tableName string, entities []map[string]interface{}, properties []DatasetProperty) error {
+func syncDatasetEntities(db DBExecutor, tableName string, entities []map[string]interface{}, properties []DatasetProperty) error {
 	insertedCount := 0
 	updatedCount := 0
 	skippedCount := 0
@@ -41,7 +41,7 @@ func syncDatasetEntities(db *sql.DB, tableName string, entities []map[string]int
 	return nil
 }
 
-func upsertDatasetEntity(db *sql.DB, tableName string, entity map[string]interface{}, properties []DatasetProperty) (string, error) {
+func upsertDatasetEntity(db DBExecutor, tableName string, entity map[string]interface{}, properties []DatasetProperty) (string, error) {
 	entityUUID, err := getEntityUUID(entity)
 	if err != nil {
 		return "", err
@@ -210,7 +210,7 @@ func getEntitySystemData(entity map[string]interface{}) (*EntitySystemData, erro
 	}, nil
 }
 
-func getStoredEntityVersion(db *sql.DB, tableName string, entityUUID string) (int, bool, error) {
+func getStoredEntityVersion(db DBExecutor, tableName string, entityUUID string) (int, bool, error) {
 	query := fmt.Sprintf(
 		`SELECT central_version FROM %s.%s WHERE entity_uuid = $1`,
 		quoteIdentifier(datasetSchema),
