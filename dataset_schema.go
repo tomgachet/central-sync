@@ -15,13 +15,119 @@ func ensureDatasetTableExists(db *sql.DB, tableName string) error {
 			central_created_at TIMESTAMPTZ,
 			central_updated_at TIMESTAMPTZ,
 			central_deleted_at TIMESTAMPTZ,
+			central_version INT,
 			synced_at TIMESTAMPTZ
 		)
-	`, datasetSchema, quoteIdentifier(tableName))
+	`, quoteIdentifier(datasetSchema), quoteIdentifier(tableName))
 
 	_, err := db.Exec(query)
 	if err != nil {
-		return fmt.Errorf("failed to create dataset table %s.%s: %w", datasetSchema, tableName, err)
+		return fmt.Errorf(
+			"failed to create dataset table %s.%s: %w",
+			datasetSchema,
+			tableName,
+			err,
+		)
+	}
+
+	return nil
+}
+
+func ensureTechnicalColumnsExist(db *sql.DB, tableName string) error {
+	technicalColumns := map[string]string{
+		"central_created_at": "TIMESTAMPTZ",
+		"central_updated_at": "TIMESTAMPTZ",
+		"central_deleted_at": "TIMESTAMPTZ",
+		"central_version":    "INT",
+		"label":              "TEXT",
+		"data_json":          "JSONB",
+		"synced_at":          "TIMESTAMPTZ",
+	}
+
+	for columnName, columnType := range technicalColumns {
+		exists, err := columnExists(db, datasetSchema, tableName, columnName)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			continue
+		}
+
+		query := fmt.Sprintf(
+			`ALTER TABLE %s.%s ADD COLUMN %s %s`,
+			quoteIdentifier(datasetSchema),
+			quoteIdentifier(tableName),
+			quoteIdentifier(columnName),
+			columnType,
+		)
+
+		_, err = db.Exec(query)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to add technical column %s to table %s.%s: %w",
+				columnName,
+				datasetSchema,
+				tableName,
+				err,
+			)
+		}
+	}
+
+	return nil
+}
+
+func ensureDatasetPropertyColumnsExist(db *sql.DB, tableName string, properties []DatasetProperty) error {
+	for _, property := range properties {
+		columnName := property.ODataName
+		if columnName == "" {
+			columnName = property.Name
+		}
+
+		columnName = strings.TrimSpace(columnName)
+		if columnName == "" {
+			continue
+		}
+
+		if isReservedTechnicalColumn(columnName) {
+			continue
+		}
+
+		err := ensureDatasetPropertyColumnExists(db, tableName, columnName)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensureDatasetPropertyColumnExists(db *sql.DB, tableName string, columnName string) error {
+	exists, err := columnExists(db, datasetSchema, tableName, columnName)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		return nil
+	}
+
+	query := fmt.Sprintf(
+		`ALTER TABLE %s.%s ADD COLUMN %s TEXT`,
+		quoteIdentifier(datasetSchema),
+		quoteIdentifier(tableName),
+		quoteIdentifier(columnName),
+	)
+
+	_, err = db.Exec(query)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to add property column %s to table %s.%s: %w",
+			columnName,
+			datasetSchema,
+			tableName,
+			err,
+		)
 	}
 
 	return nil
@@ -47,59 +153,22 @@ func columnExists(db *sql.DB, schemaName string, tableName string, columnName st
 	return exists, nil
 }
 
-func ensureDatasetColumnExists(db *sql.DB, tableName string, columnName string) error {
-	exists, err := columnExists(db, datasetSchema, tableName, columnName)
-	if err != nil {
-		return err
-	}
-
-	if exists {
-		return nil
-	}
-
-	query := fmt.Sprintf(
-		`ALTER TABLE %s.%s ADD COLUMN %s TEXT`,
-		datasetSchema,
-		quoteIdentifier(tableName),
-		quoteIdentifier(columnName),
-	)
-
-	_, err = db.Exec(query)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to add column %s to table %s.%s: %w",
-			columnName,
-			datasetSchema,
-			tableName,
-			err,
-		)
-	}
-
-	return nil
-}
-
-func ensureDatasetColumnsExist(db *sql.DB, tableName string, properties []DatasetProperty) error {
-	for _, property := range properties {
-		columnName := property.ODataName
-		if columnName == "" {
-			columnName = property.Name
-		}
-
-		columnName = strings.TrimSpace(columnName)
-		if columnName == "" {
-			continue
-		}
-
-		err := ensureDatasetColumnExists(db, tableName, columnName)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func quoteIdentifier(identifier string) string {
 	safe := strings.ReplaceAll(identifier, `"`, `""`)
 	return `"` + safe + `"`
+}
+
+func isReservedTechnicalColumn(columnName string) bool {
+	reserved := map[string]bool{
+		"entity_uuid":        true,
+		"label":              true,
+		"data_json":          true,
+		"central_created_at": true,
+		"central_updated_at": true,
+		"central_deleted_at": true,
+		"central_version":    true,
+		"synced_at":          true,
+	}
+
+	return reserved[columnName]
 }

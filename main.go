@@ -28,58 +28,96 @@ func main() {
 
 	token, err := getValidCentralToken()
 	if err != nil {
-	fmt.Println("Central token error:", err)
-	return
-	}
-
-	project := config.Projects[0]
-	datasetsToSync := getDatasetsToSync(project)
-
-	if len(datasetsToSync) == 0 {
-		fmt.Println("No dataset to sync")
+		fmt.Println("Central token error:", err)
 		return
 	}
 
-	dataset := datasetsToSync[0]
+	fmt.Println("Starting dataset sync")
 
-	fmt.Printf(
-		"Preparing dataset table for project %d (%s), dataset %s -> table %s\n",
-		project.ProjectID,
-		project.ProjectName,
-		dataset.Name,
-		dataset.TableName,
-	)
+	for _, project := range config.Projects {
+		datasetsToSync := getDatasetsToSync(project)
 
-	db, err := connectProjectDatabase(project.DatabaseName)
-	if err != nil {
-		fmt.Println("Database connection error:", err)
-		return
+		if len(datasetsToSync) == 0 {
+			fmt.Printf(
+				"\nSkipping project %d (%s): no dataset to sync\n",
+				project.ProjectID,
+				project.ProjectName,
+			)
+			continue
+		}
+
+		fmt.Printf(
+			"\nProcessing project %d (%s) -> database %s\n",
+			project.ProjectID,
+			project.ProjectName,
+			project.DatabaseName,
+		)
+
+		db, err := connectProjectDatabase(project.DatabaseName)
+		if err != nil {
+			fmt.Println("Database connection error:", err)
+			continue
+		}
+
+		err = requireSchema(db, datasetSchema)
+		if err != nil {
+			fmt.Println("Schema error:", err)
+			db.Close()
+			continue
+		}
+
+		for _, dataset := range datasetsToSync {
+			fmt.Printf(
+				"\nSyncing dataset %s -> table %s\n",
+				dataset.Name,
+				dataset.TableName,
+			)
+
+			metadata, err := getDatasetMetadata(centralURL, token, project.ProjectID, dataset.Name)
+			if err != nil {
+				fmt.Println("Dataset metadata error:", err)
+				continue
+			}
+
+			err = ensureDatasetTableExists(db, dataset.TableName)
+			if err != nil {
+				fmt.Println("Table error:", err)
+				continue
+			}
+
+			err = ensureTechnicalColumnsExist(db, dataset.TableName)
+			if err != nil {
+				fmt.Println("Technical column error:", err)
+				continue
+			}
+
+			err = ensureDatasetPropertyColumnsExist(db, dataset.TableName, metadata.Properties)
+			if err != nil {
+				fmt.Println("Dataset property column error:", err)
+				continue
+			}
+
+			entities, err := getAllDatasetEntities(centralURL, token, project.ProjectID, dataset.Name)
+			if err != nil {
+				fmt.Println("Dataset entities error:", err)
+				continue
+			}
+
+			err = syncDatasetEntities(db, dataset.TableName, entities, metadata.Properties)
+			if err != nil {
+				fmt.Println("Dataset sync error:", err)
+				continue
+			}
+
+			fmt.Printf(
+				"Dataset %s synced successfully: %d entities\n",
+				dataset.Name,
+				len(entities),
+			)
+		}
+
+		db.Close()
 	}
-	defer db.Close()
 
-	err = requireSchema(db, datasetSchema)
-	if err != nil {
-		fmt.Println("Schema error:", err)
-		return
-	}
-
-	metadata, err := getDatasetMetadata(centralURL, token, project.ProjectID, dataset.Name)
-	if err != nil {
-		fmt.Println("Dataset metadata error:", err)
-		return
-	}
-
-	err = ensureDatasetTableExists(db, dataset.TableName)
-	if err != nil {
-		fmt.Println("Table error:", err)
-		return
-	}
-
-	err = ensureDatasetColumnsExist(db, dataset.TableName, metadata.Properties)
-	if err != nil {
-		fmt.Println("Column error:", err)
-		return
-	}
-
-	fmt.Printf("Dataset table %s.%s is ready\n", datasetSchema, dataset.TableName)
+	fmt.Println("\nDataset sync finished")
 }
