@@ -14,6 +14,20 @@ func syncAllProjects(projects []ProjectMapping, centralURL string, token string)
 }
 
 func syncProjectDatasets(project ProjectMapping, centralURL string, token string) error {
+	exists, err := projectExists(centralURL, token, project.ProjectID)
+	if err != nil {
+		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
+	}
+
+	if !exists {
+		fmt.Printf(
+			"\nSkipping project %d (%s): project does not exist in ODK Central\n",
+			project.ProjectID,
+			project.ProjectName,
+		)
+		return nil
+	}
+
 	datasetsToSync := getDatasetsToSync(project)
 
 	if len(datasetsToSync) == 0 {

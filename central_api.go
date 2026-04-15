@@ -58,3 +58,36 @@ func listProjects(centralURL, token string) error {
 
 	return nil
 }
+
+func projectExists(centralURL, token string, projectID int) (bool, error) {
+	url := fmt.Sprintf("%s/v1/projects/%d", centralURL, projectID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create project request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to call project endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	return false, fmt.Errorf("unexpected response from project endpoint: %s - %s", resp.Status, string(body))
+}
