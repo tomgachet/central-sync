@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 type GeoJSONFeatureCollection struct {
@@ -20,22 +19,10 @@ type GeoJSONFeature struct {
 	Properties map[string]interface{} `json:"properties"`
 }
 
-func getDatasetEntitiesGeoJSON(centralURL, token string, projectID int, datasetName string) (*GeoJSONFeatureCollection, error) {
-	url := fmt.Sprintf("%s/v1/projects/%d/datasets/%s/entities.geojson", centralURL, projectID, datasetName)
+func getDatasetEntitiesGeoJSON(client *CentralClient, projectID int, datasetName string) (*GeoJSONFeatureCollection, error) {
+	url := fmt.Sprintf("%s/v1/projects/%d/datasets/%s/entities.geojson", client.BaseURL, projectID, datasetName)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dataset GeoJSON request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call dataset GeoJSON endpoint: %w", err)
 	}

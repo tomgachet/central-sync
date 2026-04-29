@@ -20,21 +20,15 @@ func main() {
 		return
 	}
 
-	centralURL, err := getRequiredEnv("ODK_CENTRAL_URL")
+	client, err := newCentralClient()
 	if err != nil {
-		fmt.Println("Environment error:", err)
-		return
-	}
-
-	token, err := getValidCentralToken()
-	if err != nil {
-		fmt.Println("Central token error:", err)
+		fmt.Println("Central client error:", err)
 		return
 	}
 
 	fmt.Println("Starting dataset sync")
 
-	syncAllProjects(config.Projects, centralURL, token)
+	syncAllProjects(config.Projects, client)
 
 	fmt.Println("\nDataset sync finished")
 }

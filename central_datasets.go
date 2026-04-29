@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 type DatasetProperty struct {
@@ -19,22 +18,10 @@ type DatasetMetadata struct {
 	Properties []DatasetProperty `json:"properties"`
 }
 
-func getDatasetMetadata(centralURL string, token string, projectID int, datasetName string) (*DatasetMetadata, error) {
-	url := fmt.Sprintf("%s/v1/projects/%d/datasets/%s", centralURL, projectID, datasetName)
+func getDatasetMetadata(client *CentralClient, projectID int, datasetName string) (*DatasetMetadata, error) {
+	url := fmt.Sprintf("%s/v1/projects/%d/datasets/%s", client.BaseURL, projectID, datasetName)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dataset metadata request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{
-		Timeout: 20 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call dataset metadata endpoint: %w", err)
 	}

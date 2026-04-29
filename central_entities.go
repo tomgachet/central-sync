@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 type ODataEntitiesResponse struct {
@@ -15,19 +14,19 @@ type ODataEntitiesResponse struct {
 	Value    []map[string]interface{} `json:"value"`
 }
 
-func getDatasetEntities(centralURL, token string, projectID int, datasetName string) (*ODataEntitiesResponse, error) {
+func getDatasetEntities(client *CentralClient, projectID int, datasetName string) (*ODataEntitiesResponse, error) {
 	url := fmt.Sprintf(
 		"%s/v1/projects/%d/datasets/%s.svc/Entities?$top=1000&$count=true",
-		centralURL,
+		client.BaseURL,
 		projectID,
 		datasetName,
 	)
 
-	return fetchDatasetEntitiesPage(url, token)
+	return fetchDatasetEntitiesPage(client, url)
 }
 
-func getAllDatasetEntities(centralURL, token string, projectID int, datasetName string) ([]map[string]interface{}, error) {
-	firstPage, err := getDatasetEntities(centralURL, token, projectID, datasetName)
+func getAllDatasetEntities(client *CentralClient, projectID int, datasetName string) ([]map[string]interface{}, error) {
+	firstPage, err := getDatasetEntities(client, projectID, datasetName)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +37,7 @@ func getAllDatasetEntities(centralURL, token string, projectID int, datasetName 
 	nextLink := firstPage.NextLink
 
 	for nextLink != "" {
-		page, err := fetchDatasetEntitiesPage(nextLink, token)
+		page, err := fetchDatasetEntitiesPage(client, nextLink)
 		if err != nil {
 			return nil, err
 		}
@@ -50,20 +49,8 @@ func getAllDatasetEntities(centralURL, token string, projectID int, datasetName 
 	return allEntities, nil
 }
 
-func fetchDatasetEntitiesPage(url, token string) (*ODataEntitiesResponse, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dataset entities request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+func fetchDatasetEntitiesPage(client *CentralClient, url string) (*ODataEntitiesResponse, error) {
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call dataset entities endpoint: %w", err)
 	}

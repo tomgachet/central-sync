@@ -1,20 +1,18 @@
 package main
 
-import (
-	"fmt"
-)
+import "fmt"
 
-func syncAllProjects(projects []ProjectMapping, centralURL string, token string) {
+func syncAllProjects(projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
-		err := syncProjectDatasets(project, centralURL, token)
+		err := syncProjectDatasets(project, client)
 		if err != nil {
 			fmt.Println("Project sync error:", err)
 		}
 	}
 }
 
-func syncProjectDatasets(project ProjectMapping, centralURL string, token string) error {
-	exists, err := projectExists(centralURL, token, project.ProjectID)
+func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
+	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
 	}
@@ -58,7 +56,7 @@ func syncProjectDatasets(project ProjectMapping, centralURL string, token string
 	}
 
 	for _, dataset := range datasetsToSync {
-		err := syncSingleDataset(db, project, dataset, centralURL, token)
+		err := syncSingleDataset(db, project, dataset, client)
 		if err != nil {
 			fmt.Println("Dataset sync error:", err)
 		}
@@ -67,14 +65,14 @@ func syncProjectDatasets(project ProjectMapping, centralURL string, token string
 	return nil
 }
 
-func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMapping, centralURL string, token string) error {
+func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) error {
 	fmt.Printf(
 		"\nSyncing dataset %s -> table %s\n",
 		dataset.Name,
 		dataset.TableName,
 	)
 
-	metadata, err := getDatasetMetadata(centralURL, token, project.ProjectID, dataset.Name)
+	metadata, err := getDatasetMetadata(client, project.ProjectID, dataset.Name)
 	if err != nil {
 		return fmt.Errorf("metadata error for dataset %s: %w", dataset.Name, err)
 	}
@@ -94,12 +92,12 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("property column error for dataset %s: %w", dataset.Name, err)
 	}
 
-	entities, err := getAllDatasetEntities(centralURL, token, project.ProjectID, dataset.Name)
+	entities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name)
 	if err != nil {
 		return fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
 	}
 
-	geojsonCollection, err := getDatasetEntitiesGeoJSON(centralURL, token, project.ProjectID, dataset.Name)
+	geojsonCollection, err := getDatasetEntitiesGeoJSON(client, project.ProjectID, dataset.Name)
 	if err != nil {
 		return fmt.Errorf("dataset GeoJSON error for dataset %s: %w", dataset.Name, err)
 	}
