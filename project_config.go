@@ -13,11 +13,18 @@ type DatasetMapping struct {
 	Sync      bool   `yaml:"sync"`
 }
 
+type FormMapping struct {
+	XMLFormID string `yaml:"xml_form_id"`
+	TableName string `yaml:"table_name"`
+	Sync      bool   `yaml:"sync"`
+}
+
 type ProjectMapping struct {
 	ProjectID    int              `yaml:"project_id"`
 	ProjectName  string           `yaml:"project_name"`
 	DatabaseName string           `yaml:"database_name"`
 	Datasets     []DatasetMapping `yaml:"datasets"`
+	Forms        []FormMapping    `yaml:"forms"`
 }
 
 type ProjectConfig struct {
@@ -48,4 +55,16 @@ func getDatasetsToSync(project ProjectMapping) []DatasetMapping {
 	}
 
 	return datasetsToSync
+}
+
+func getFormsToSync(project ProjectMapping) []FormMapping {
+	var formsToSync []FormMapping
+
+	for _, form := range project.Forms {
+		if form.Sync {
+			formsToSync = append(formsToSync, form)
+		}
+	}
+
+	return formsToSync
 }

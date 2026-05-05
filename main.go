@@ -27,8 +27,10 @@ func main() {
 	}
 
 	fmt.Println("Starting dataset sync")
-
 	syncAllProjects(config.Projects, client)
-
 	fmt.Println("\nDataset sync finished")
+
+	fmt.Println("\nStarting form sync")
+	syncAllForms(config.Projects, client)
+	fmt.Println("\nForm sync finished")
 }
