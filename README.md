@@ -60,7 +60,7 @@ projects:
 
 <br>
 
-In Postgresql, some preparations need to be made with a superuser :
+In Postgresql, some preparations need to be made with a superuser role:
 
 - creation of the user who will connect to PosgreSQL from central-sync
 
@@ -92,7 +92,7 @@ CREATE DATABASE target_database_name_for_project_1
 ```
 - give the right to connect to databases :
 ```sql
-GRANT CONNECT ON DATABASE target_database_name_for_project_1 TO central_user    ;
+GRANT CONNECT ON DATABASE target_database_name_for_project_1 TO central_user;
 ```
 
 - create the schemas that will host the data from ODK Central
@@ -100,7 +100,7 @@ GRANT CONNECT ON DATABASE target_database_name_for_project_1 TO central_user    
 CREATE SCHEMA central_datasets AUTHORIZATION superuser;
 CREATE SCHEMA central_submissions AUTHORIZATION superuser;
 ```
-- give the appropriate privileges on these schemas to the centralsync user
+- give the appropriate privileges on these schemas to the central-sync user
 ```sql
 GRANT ALL ON SCHEMA central_datasets TO central_user;
 GRANT ALL ON SCHEMA central_submissions TO central_user;
