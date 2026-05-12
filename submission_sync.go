@@ -4,13 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
 func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]interface{}) error {
-	inserted := 0
-	updated := 0
-	skipped := 0
+	insertedCount := 0
+	updatedCount := 0
+	skippedCount := 0
 
 	for _, row := range rows {
 		action, err := upsertFormSubmission(db, tableName, row)
@@ -20,11 +21,11 @@ func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]inte
 
 		switch action {
 		case "inserted":
-			inserted++
+			insertedCount++
 		case "updated":
-			updated++
+			updatedCount++
 		case "skipped":
-			skipped++
+			skippedCount++
 		}
 	}
 
@@ -32,9 +33,9 @@ func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]inte
 		"Sync summary for %s.%s: inserted=%d updated=%d skipped=%d\n",
 		submissionSchema,
 		tableName,
-		inserted,
-		updated,
-		skipped,
+		insertedCount,
+		updatedCount,
+		skippedCount,
 	)
 
 	return nil
@@ -48,17 +49,17 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 
 	instanceID := getSubmissionInstanceID(row)
 
-	system, err := getSubmissionSystemData(row)
+	systemData, err := getSubmissionSystemData(row)
 	if err != nil {
 		return "", err
 	}
 
-	stored, exists, err := getStoredSubmissionState(db, tableName, submissionUUID)
+	existingState, exists, err := getStoredSubmissionState(db, tableName, submissionUUID)
 	if err != nil {
 		return "", err
 	}
 
-	if exists && submissionStateUnchanged(stored, system) {
+	if exists && submissionStateUnchanged(existingState, systemData) {
 		return "skipped", nil
 	}
 
@@ -67,8 +68,8 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 		return "", fmt.Errorf("failed to marshal submission JSON: %w", err)
 	}
 
-	query := fmt.Sprintf(`
-		INSERT INTO %s.%s (
+	query := fmt.Sprintf(
+		`INSERT INTO %s.%s (
 			submission_uuid,
 			instance_id,
 			data_json,
@@ -103,8 +104,7 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 			central_edits = EXCLUDED.central_edits,
 			central_review_state = EXCLUDED.central_review_state,
 			central_status = EXCLUDED.central_status,
-			synced_at = EXCLUDED.synced_at
-	`,
+			synced_at = EXCLUDED.synced_at`,
 		quoteIdentifier(submissionSchema),
 		quoteIdentifier(tableName),
 	)
@@ -114,18 +114,18 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 		submissionUUID,
 		instanceID,
 		dataJSON,
-		system.SubmissionDate,
-		system.UpdatedAt,
-		system.DeletedAt,
-		system.SubmitterID,
-		system.SubmitterName,
-		system.FormVersion,
-		system.AttachmentsPresent,
-		system.AttachmentsExpected,
-		system.DeviceID,
-		system.Edits,
-		system.ReviewState,
-		system.Status,
+		systemData.SubmissionDate,
+		systemData.UpdatedAt,
+		systemData.DeletedAt,
+		systemData.SubmitterID,
+		systemData.SubmitterName,
+		systemData.FormVersion,
+		systemData.AttachmentsPresent,
+		systemData.AttachmentsExpected,
+		systemData.DeviceID,
+		systemData.Edits,
+		systemData.ReviewState,
+		systemData.Status,
 		time.Now().UTC(),
 	)
 	if err != nil {
@@ -160,63 +160,102 @@ type StoredSubmissionState struct {
 }
 
 func getSubmissionUUID(row map[string]interface{}) (string, error) {
-	val, ok := row["__id"].(string)
-	if !ok || val == "" {
+	raw, ok := row["__id"].(string)
+	if !ok || raw == "" {
 		return "", fmt.Errorf("invalid __id")
 	}
-	return val, nil
+
+	return strings.TrimPrefix(raw, "uuid:"), nil
 }
 
-func getSubmissionInstanceID(row map[string]interface{}) string {
+func getSubmissionInstanceID(row map[string]interface{}) *string {
 	meta, ok := row["meta"].(map[string]interface{})
 	if !ok {
-		return ""
+		return nil
 	}
 
-	val, _ := meta["instanceID"].(string)
-	return val
+	raw, ok := meta["instanceID"].(string)
+	if !ok || raw == "" {
+		return nil
+	}
+
+	clean := strings.TrimPrefix(raw, "uuid:")
+	return &clean
 }
 
 func getSubmissionSystemData(row map[string]interface{}) (*SubmissionSystemData, error) {
-	sys, ok := row["__system"].(map[string]interface{})
+	rawSystem, ok := row["__system"]
+	if !ok || rawSystem == nil {
+		return nil, fmt.Errorf("submission missing __system")
+	}
+
+	systemMap, ok := rawSystem.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("missing __system")
+		return nil, fmt.Errorf("submission __system is invalid")
+	}
+
+	submissionDate, err := extractOptionalTime(systemMap["submissionDate"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.submissionDate: %w", err)
+	}
+
+	updatedAt, err := extractOptionalTime(systemMap["updatedAt"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.updatedAt: %w", err)
+	}
+
+	deletedAt, err := extractOptionalTime(systemMap["deletedAt"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.deletedAt: %w", err)
+	}
+
+	attachmentsPresent, err := extractOptionalInt(systemMap["attachmentsPresent"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.attachmentsPresent: %w", err)
+	}
+
+	attachmentsExpected, err := extractOptionalInt(systemMap["attachmentsExpected"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.attachmentsExpected: %w", err)
+	}
+
+	edits, err := extractOptionalInt(systemMap["edits"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid __system.edits: %w", err)
 	}
 
 	return &SubmissionSystemData{
-		SubmissionDate:      mustTime(sys["submissionDate"]),
-		UpdatedAt:           mustTime(sys["updatedAt"]),
-		DeletedAt:           mustTime(sys["deletedAt"]),
-		SubmitterID:         mustInt(sys["submitterId"]),
-		SubmitterName:       mustString(sys["submitterName"]),
-		FormVersion:         mustString(sys["formVersion"]),
-		AttachmentsPresent:  mustInt(sys["attachmentsPresent"]),
-		AttachmentsExpected: mustInt(sys["attachmentsExpected"]),
-		DeviceID:            mustString(sys["deviceId"]),
-		Edits:               mustInt(sys["edits"]),
-		ReviewState:         mustString(sys["reviewState"]),
-		Status:              mustString(sys["status"]),
+		SubmissionDate:      submissionDate,
+		UpdatedAt:           updatedAt,
+		DeletedAt:           deletedAt,
+		SubmitterID:         mustInt(systemMap["submitterId"]),
+		SubmitterName:       extractOptionalString(systemMap["submitterName"]),
+		FormVersion:         extractOptionalString(systemMap["formVersion"]),
+		AttachmentsPresent:  attachmentsPresent,
+		AttachmentsExpected: attachmentsExpected,
+		DeviceID:            extractOptionalString(systemMap["deviceId"]),
+		Edits:               edits,
+		ReviewState:         extractOptionalString(systemMap["reviewState"]),
+		Status:              extractOptionalString(systemMap["status"]),
 	}, nil
 }
 
-func getStoredSubmissionState(db DBExecutor, tableName string, uuid string) (*StoredSubmissionState, bool, error) {
-	query := fmt.Sprintf(`
-		SELECT central_submission_date, central_updated_at
-		FROM %s.%s
-		WHERE submission_uuid = $1
-	`,
+func getStoredSubmissionState(db DBExecutor, tableName string, submissionUUID string) (*StoredSubmissionState, bool, error) {
+	query := fmt.Sprintf(
+		`SELECT central_submission_date, central_updated_at
+		 FROM %s.%s
+		 WHERE submission_uuid = $1`,
 		quoteIdentifier(submissionSchema),
 		quoteIdentifier(tableName),
 	)
 
 	var state StoredSubmissionState
-	err := db.QueryRow(query, uuid).Scan(&state.SubmissionDate, &state.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, false, nil
-	}
+	err := db.QueryRow(query, submissionUUID).Scan(&state.SubmissionDate, &state.UpdatedAt)
 	if err != nil {
-		return nil, false, err
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to read stored submission state: %w", err)
 	}
 
 	return &state, true, nil
@@ -242,56 +281,14 @@ func sameNullableTime(stored sql.NullTime, current *time.Time) bool {
 	if !stored.Valid && current == nil {
 		return true
 	}
+
 	if stored.Valid != (current != nil) {
 		return false
 	}
+
 	if current == nil {
 		return false
 	}
+
 	return stored.Time.Equal(*current)
-}
-
-func mustString(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return fmt.Sprintf("%v", v)
-	}
-	return s
-}
-
-func mustInt(v interface{}) *int {
-	if v == nil {
-		return nil
-	}
-
-	switch val := v.(type) {
-	case float64:
-		i := int(val)
-		return &i
-	case int:
-		return &val
-	default:
-		return nil
-	}
-}
-
-func mustTime(v interface{}) *time.Time {
-	if v == nil {
-		return nil
-	}
-
-	s, ok := v.(string)
-	if !ok || s == "" {
-		return nil
-	}
-
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return nil
-	}
-
-	return &t
 }
