@@ -8,9 +8,9 @@ import (
 )
 
 func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]interface{}) error {
-	insertedCount := 0
-	updatedCount := 0
-	skippedCount := 0
+	inserted := 0
+	updated := 0
+	skipped := 0
 
 	for _, row := range rows {
 		action, err := upsertFormSubmission(db, tableName, row)
@@ -20,11 +20,11 @@ func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]inte
 
 		switch action {
 		case "inserted":
-			insertedCount++
+			inserted++
 		case "updated":
-			updatedCount++
+			updated++
 		case "skipped":
-			skippedCount++
+			skipped++
 		}
 	}
 
@@ -32,9 +32,9 @@ func syncFormSubmissions(db DBExecutor, tableName string, rows []map[string]inte
 		"Sync summary for %s.%s: inserted=%d updated=%d skipped=%d\n",
 		submissionSchema,
 		tableName,
-		insertedCount,
-		updatedCount,
-		skippedCount,
+		inserted,
+		updated,
+		skipped,
 	)
 
 	return nil
@@ -48,17 +48,17 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 
 	instanceID := getSubmissionInstanceID(row)
 
-	systemData, err := getSubmissionSystemData(row)
+	system, err := getSubmissionSystemData(row)
 	if err != nil {
 		return "", err
 	}
 
-	existingState, exists, err := getStoredSubmissionState(db, tableName, submissionUUID)
+	stored, exists, err := getStoredSubmissionState(db, tableName, submissionUUID)
 	if err != nil {
 		return "", err
 	}
 
-	if exists && submissionStateUnchanged(existingState, systemData) {
+	if exists && submissionStateUnchanged(stored, system) {
 		return "skipped", nil
 	}
 
@@ -67,45 +67,44 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 		return "", fmt.Errorf("failed to marshal submission JSON: %w", err)
 	}
 
-	pointGeoJSON, err := buildSubmissionGeoJSONValue(row, "point")
-	if err != nil {
-		return "", err
-	}
-
-	shapeGeoJSON, err := buildSubmissionGeoJSONValue(row, "shape")
-	if err != nil {
-		return "", err
-	}
-
-	query := fmt.Sprintf(
-		`INSERT INTO %s.%s (
-			"submission_uuid",
-			"instance_id",
-			"data_json",
-			"point_geojson",
-			"shape_geojson",
-			"central_submission_date",
-			"central_updated_at",
-			"central_deleted_at",
-			"central_submitter_id",
-			"central_submitter_name",
-			"central_form_version",
-			"synced_at"
+	query := fmt.Sprintf(`
+		INSERT INTO %s.%s (
+			submission_uuid,
+			instance_id,
+			data_json,
+			central_submission_date,
+			central_updated_at,
+			central_deleted_at,
+			central_submitter_id,
+			central_submitter_name,
+			central_form_version,
+			central_attachments_present,
+			central_attachments_expected,
+			central_device_id,
+			central_edits,
+			central_review_state,
+			central_status,
+			synced_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		ON CONFLICT ("submission_uuid")
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		ON CONFLICT (submission_uuid)
 		DO UPDATE SET
-			"instance_id" = EXCLUDED."instance_id",
-			"data_json" = EXCLUDED."data_json",
-			"point_geojson" = EXCLUDED."point_geojson",
-			"shape_geojson" = EXCLUDED."shape_geojson",
-			"central_submission_date" = EXCLUDED."central_submission_date",
-			"central_updated_at" = EXCLUDED."central_updated_at",
-			"central_deleted_at" = EXCLUDED."central_deleted_at",
-			"central_submitter_id" = EXCLUDED."central_submitter_id",
-			"central_submitter_name" = EXCLUDED."central_submitter_name",
-			"central_form_version" = EXCLUDED."central_form_version",
-			"synced_at" = EXCLUDED."synced_at"`,
+			instance_id = EXCLUDED.instance_id,
+			data_json = EXCLUDED.data_json,
+			central_submission_date = EXCLUDED.central_submission_date,
+			central_updated_at = EXCLUDED.central_updated_at,
+			central_deleted_at = EXCLUDED.central_deleted_at,
+			central_submitter_id = EXCLUDED.central_submitter_id,
+			central_submitter_name = EXCLUDED.central_submitter_name,
+			central_form_version = EXCLUDED.central_form_version,
+			central_attachments_present = EXCLUDED.central_attachments_present,
+			central_attachments_expected = EXCLUDED.central_attachments_expected,
+			central_device_id = EXCLUDED.central_device_id,
+			central_edits = EXCLUDED.central_edits,
+			central_review_state = EXCLUDED.central_review_state,
+			central_status = EXCLUDED.central_status,
+			synced_at = EXCLUDED.synced_at
+	`,
 		quoteIdentifier(submissionSchema),
 		quoteIdentifier(tableName),
 	)
@@ -115,24 +114,22 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 		submissionUUID,
 		instanceID,
 		dataJSON,
-		pointGeoJSON,
-		shapeGeoJSON,
-		systemData.SubmissionDate,
-		systemData.UpdatedAt,
-		systemData.DeletedAt,
-		systemData.SubmitterID,
-		systemData.SubmitterName,
-		systemData.FormVersion,
+		system.SubmissionDate,
+		system.UpdatedAt,
+		system.DeletedAt,
+		system.SubmitterID,
+		system.SubmitterName,
+		system.FormVersion,
+		system.AttachmentsPresent,
+		system.AttachmentsExpected,
+		system.DeviceID,
+		system.Edits,
+		system.ReviewState,
+		system.Status,
 		time.Now().UTC(),
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"failed to upsert submission %s into %s.%s: %w",
-			submissionUUID,
-			submissionSchema,
-			tableName,
-			err,
-		)
+		return "", fmt.Errorf("failed to upsert submission %s: %w", submissionUUID, err)
 	}
 
 	if exists {
@@ -143,12 +140,18 @@ func upsertFormSubmission(db DBExecutor, tableName string, row map[string]interf
 }
 
 type SubmissionSystemData struct {
-	SubmissionDate *time.Time
-	UpdatedAt      *time.Time
-	DeletedAt      *time.Time
-	SubmitterID    string
-	SubmitterName  string
-	FormVersion    string
+	SubmissionDate      *time.Time
+	UpdatedAt           *time.Time
+	DeletedAt           *time.Time
+	SubmitterID         *int
+	SubmitterName       string
+	FormVersion         string
+	AttachmentsPresent  *int
+	AttachmentsExpected *int
+	DeviceID            string
+	Edits               *int
+	ReviewState         string
+	Status              string
 }
 
 type StoredSubmissionState struct {
@@ -157,95 +160,63 @@ type StoredSubmissionState struct {
 }
 
 func getSubmissionUUID(row map[string]interface{}) (string, error) {
-	raw, ok := row["__id"]
-	if !ok {
-		return "", fmt.Errorf("submission is missing __id")
+	val, ok := row["__id"].(string)
+	if !ok || val == "" {
+		return "", fmt.Errorf("invalid __id")
 	}
-
-	value, ok := raw.(string)
-	if !ok || value == "" {
-		return "", fmt.Errorf("submission __id is invalid")
-	}
-
-	return value, nil
+	return val, nil
 }
 
 func getSubmissionInstanceID(row map[string]interface{}) string {
-	rawMeta, ok := row["meta"]
-	if !ok || rawMeta == nil {
-		return ""
-	}
-
-	metaMap, ok := rawMeta.(map[string]interface{})
+	meta, ok := row["meta"].(map[string]interface{})
 	if !ok {
 		return ""
 	}
 
-	rawInstanceID, ok := metaMap["instanceID"]
-	if !ok || rawInstanceID == nil {
-		return ""
-	}
-
-	value, ok := rawInstanceID.(string)
-	if !ok {
-		return ""
-	}
-
-	return value
+	val, _ := meta["instanceID"].(string)
+	return val
 }
 
 func getSubmissionSystemData(row map[string]interface{}) (*SubmissionSystemData, error) {
-	rawSystem, ok := row["__system"]
-	if !ok || rawSystem == nil {
-		return nil, fmt.Errorf("submission is missing __system")
-	}
-
-	systemMap, ok := rawSystem.(map[string]interface{})
+	sys, ok := row["__system"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("submission __system is invalid")
-	}
-
-	submissionDate, err := extractOptionalTime(systemMap["submissionDate"])
-	if err != nil {
-		return nil, fmt.Errorf("invalid __system.submissionDate: %w", err)
-	}
-
-	updatedAt, err := extractOptionalTime(systemMap["updatedAt"])
-	if err != nil {
-		return nil, fmt.Errorf("invalid __system.updatedAt: %w", err)
-	}
-
-	deletedAt, err := extractOptionalTime(systemMap["deletedAt"])
-	if err != nil {
-		return nil, fmt.Errorf("invalid __system.deletedAt: %w", err)
+		return nil, fmt.Errorf("missing __system")
 	}
 
 	return &SubmissionSystemData{
-		SubmissionDate: submissionDate,
-		UpdatedAt:      updatedAt,
-		DeletedAt:      deletedAt,
-		SubmitterID:    extractOptionalString(systemMap["submitterId"]),
-		SubmitterName:  extractOptionalString(systemMap["submitterName"]),
-		FormVersion:    extractOptionalString(systemMap["formVersion"]),
+		SubmissionDate:      mustTime(sys["submissionDate"]),
+		UpdatedAt:           mustTime(sys["updatedAt"]),
+		DeletedAt:           mustTime(sys["deletedAt"]),
+		SubmitterID:         mustInt(sys["submitterId"]),
+		SubmitterName:       mustString(sys["submitterName"]),
+		FormVersion:         mustString(sys["formVersion"]),
+		AttachmentsPresent:  mustInt(sys["attachmentsPresent"]),
+		AttachmentsExpected: mustInt(sys["attachmentsExpected"]),
+		DeviceID:            mustString(sys["deviceId"]),
+		Edits:               mustInt(sys["edits"]),
+		ReviewState:         mustString(sys["reviewState"]),
+		Status:              mustString(sys["status"]),
 	}, nil
 }
 
-func getStoredSubmissionState(db DBExecutor, tableName string, submissionUUID string) (*StoredSubmissionState, bool, error) {
-	query := fmt.Sprintf(
-		`SELECT "central_submission_date", "central_updated_at"
-		 FROM %s.%s
-		 WHERE "submission_uuid" = $1`,
+func getStoredSubmissionState(db DBExecutor, tableName string, uuid string) (*StoredSubmissionState, bool, error) {
+	query := fmt.Sprintf(`
+		SELECT central_submission_date, central_updated_at
+		FROM %s.%s
+		WHERE submission_uuid = $1
+	`,
 		quoteIdentifier(submissionSchema),
 		quoteIdentifier(tableName),
 	)
 
 	var state StoredSubmissionState
-	err := db.QueryRow(query, submissionUUID).Scan(&state.SubmissionDate, &state.UpdatedAt)
+	err := db.QueryRow(query, uuid).Scan(&state.SubmissionDate, &state.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("failed to read stored submission state: %w", err)
+		return nil, false, err
 	}
 
 	return &state, true, nil
@@ -271,41 +242,56 @@ func sameNullableTime(stored sql.NullTime, current *time.Time) bool {
 	if !stored.Valid && current == nil {
 		return true
 	}
-
 	if stored.Valid != (current != nil) {
 		return false
 	}
-
 	if current == nil {
 		return false
 	}
-
 	return stored.Time.Equal(*current)
 }
 
-func buildSubmissionGeoJSONValue(row map[string]interface{}, key string) ([]byte, error) {
-	raw, ok := row[key]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-
-	geoJSON, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal %s GeoJSON: %w", key, err)
-	}
-
-	return geoJSON, nil
-}
-
-func extractOptionalString(raw interface{}) string {
-	if raw == nil {
+func mustString(v interface{}) string {
+	if v == nil {
 		return ""
 	}
-
-	value, ok := raw.(string)
+	s, ok := v.(string)
 	if !ok {
-		return fmt.Sprintf("%v", raw)
+		return fmt.Sprintf("%v", v)
+	}
+	return s
+}
+
+func mustInt(v interface{}) *int {
+	if v == nil {
+		return nil
 	}
 
-	return value
+	switch val := v.(type) {
+	case float64:
+		i := int(val)
+		return &i
+	case int:
+		return &val
+	default:
+		return nil
+	}
+}
+
+func mustTime(v interface{}) *time.Time {
+	if v == nil {
+		return nil
+	}
+
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return nil
+	}
+
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil
+	}
+
+	return &t
 }
