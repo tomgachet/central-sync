@@ -318,24 +318,6 @@ func buildGeometryGeoJSONValue(geometryGeoJSONByEntityID map[string]interface{},
 	return geometryJSON, nil
 }
 
-func extractOptionalTime(raw interface{}) (*time.Time, error) {
-	if raw == nil {
-		return nil, nil
-	}
-
-	value, ok := raw.(string)
-	if !ok || value == "" {
-		return nil, nil
-	}
-
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return nil, err
-	}
-
-	return &parsed, nil
-}
-
 func extractInt(raw interface{}) (int, error) {
 	switch value := raw.(type) {
 	case float64:
@@ -346,6 +328,13 @@ func extractInt(raw interface{}) (int, error) {
 		return int(value), nil
 	case int64:
 		return int(value), nil
+	case string:
+		var i int
+		_, err := fmt.Sscanf(value, "%d", &i)
+		if err != nil {
+			return 0, fmt.Errorf("unsupported numeric string %q", value)
+		}
+		return i, nil
 	default:
 		return 0, fmt.Errorf("unsupported numeric type %T", raw)
 	}
