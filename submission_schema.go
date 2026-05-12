@@ -12,14 +12,25 @@ func ensureSubmissionTableExists(db DBExecutor, tableName string) error {
 			submission_uuid TEXT PRIMARY KEY,
 			instance_id TEXT,
 			data_json JSONB,
-			point_geojson JSONB,
-			shape_geojson JSONB,
+
 			central_submission_date TIMESTAMPTZ,
 			central_updated_at TIMESTAMPTZ,
 			central_deleted_at TIMESTAMPTZ,
-			central_submitter_id TEXT,
-			central_submitter_name TEXT,
+
+			central_submitter_id INT,
+			central_submitter_name VARCHAR(150),
+
 			central_form_version TEXT,
+
+			central_attachments_present INT,
+			central_attachments_expected INT,
+
+			central_device_id TEXT,
+			central_edits INT,
+
+			central_review_state TEXT,
+			central_status TEXT,
+
 			synced_at TIMESTAMPTZ
 		)
 	`, quoteIdentifier(submissionSchema), quoteIdentifier(tableName))
@@ -39,17 +50,28 @@ func ensureSubmissionTableExists(db DBExecutor, tableName string) error {
 
 func ensureSubmissionTechnicalColumnsExist(db DBExecutor, tableName string) error {
 	technicalColumns := map[string]string{
-		"instance_id":              "TEXT",
-		"data_json":                "JSONB",
-		"point_geojson":            "JSONB",
-		"shape_geojson":            "JSONB",
-		"central_submission_date":  "TIMESTAMPTZ",
-		"central_updated_at":       "TIMESTAMPTZ",
-		"central_deleted_at":       "TIMESTAMPTZ",
-		"central_submitter_id":     "TEXT",
-		"central_submitter_name":   "TEXT",
-		"central_form_version":     "TEXT",
-		"synced_at":                "TIMESTAMPTZ",
+		"instance_id":                  "TEXT",
+		"data_json":                    "JSONB",
+
+		"central_submission_date":      "TIMESTAMPTZ",
+		"central_updated_at":           "TIMESTAMPTZ",
+		"central_deleted_at":           "TIMESTAMPTZ",
+
+		"central_submitter_id":         "INT",
+		"central_submitter_name":       "VARCHAR(150)",
+
+		"central_form_version":         "TEXT",
+
+		"central_attachments_present":  "INT",
+		"central_attachments_expected": "INT",
+
+		"central_device_id":            "TEXT",
+		"central_edits":                "INT",
+
+		"central_review_state":         "TEXT",
+		"central_status":               "TEXT",
+
+		"synced_at":                    "TIMESTAMPTZ",
 	}
 
 	for columnName, columnType := range technicalColumns {
@@ -73,7 +95,7 @@ func ensureSubmissionTechnicalColumnsExist(db DBExecutor, tableName string) erro
 		_, err = db.Exec(query)
 		if err != nil {
 			return fmt.Errorf(
-				"failed to add technical column %s to table %s.%s: %w",
+				"failed to add column %s to table %s.%s: %w",
 				columnName,
 				submissionSchema,
 				tableName,
