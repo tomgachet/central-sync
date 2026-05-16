@@ -5,28 +5,34 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
-type ODataSubmissionsResponse struct {
+type ODataTableRowsResponse struct {
 	Context  string                   `json:"@odata.context"`
 	Count    *int                     `json:"@odata.count,omitempty"`
 	NextLink string                   `json:"@odata.nextLink,omitempty"`
 	Value    []map[string]interface{} `json:"value"`
 }
 
-func getFormSubmissions(client *CentralClient, projectID int, xmlFormID string) (*ODataSubmissionsResponse, error) {
-	url := fmt.Sprintf(
-		"%s/v1/projects/%d/forms/%s.svc/Submissions?$top=1000&$count=true",
+func getFormTableRows(client *CentralClient, projectID int, xmlFormID string, odataTableURL string) (*ODataTableRowsResponse, error) {
+	base := fmt.Sprintf(
+		"%s/v1/projects/%d/forms/%s.svc/%s",
 		client.BaseURL,
 		projectID,
 		xmlFormID,
+		odataTableURL,
 	)
 
-	return fetchFormSubmissionsPage(client, url)
+	params := url.Values{}
+	params.Set("$top", "1000")
+	params.Set("$count", "true")
+
+	return fetchFormTableRowsPage(client, base+"?"+params.Encode())
 }
 
-func getAllFormSubmissions(client *CentralClient, projectID int, xmlFormID string) ([]map[string]interface{}, error) {
-	firstPage, err := getFormSubmissions(client, projectID, xmlFormID)
+func getAllFormTableRows(client *CentralClient, projectID int, xmlFormID string, odataTableURL string) ([]map[string]interface{}, error) {
+	firstPage, err := getFormTableRows(client, projectID, xmlFormID, odataTableURL)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +43,7 @@ func getAllFormSubmissions(client *CentralClient, projectID int, xmlFormID strin
 	nextLink := firstPage.NextLink
 
 	for nextLink != "" {
-		page, err := fetchFormSubmissionsPage(client, nextLink)
+		page, err := fetchFormTableRowsPage(client, nextLink)
 		if err != nil {
 			return nil, err
 		}
@@ -49,25 +55,25 @@ func getAllFormSubmissions(client *CentralClient, projectID int, xmlFormID strin
 	return allRows, nil
 }
 
-func fetchFormSubmissionsPage(client *CentralClient, url string) (*ODataSubmissionsResponse, error) {
-	resp, err := client.Get(url)
+func fetchFormTableRowsPage(client *CentralClient, requestURL string) (*ODataTableRowsResponse, error) {
+	resp, err := client.Get(requestURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call form submissions endpoint: %w", err)
+		return nil, fmt.Errorf("failed to call form table endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read form submissions response: %w", err)
+		return nil, fmt.Errorf("failed to read form table response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("non-OK response from form submissions endpoint: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("non-OK response from form table endpoint: %s - %s", resp.Status, string(body))
 	}
 
-	var result ODataSubmissionsResponse
+	var result ODataTableRowsResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode form submissions response: %w", err)
+		return nil, fmt.Errorf("failed to decode form table response: %w", err)
 	}
 
 	return &result, nil

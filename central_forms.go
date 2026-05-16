@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type CentralForm struct {
@@ -15,15 +16,22 @@ type CentralForm struct {
 	CreatedAt string  `json:"createdAt"`
 }
 
-type FormODataServiceDocument struct {
+type ODataServiceDocument struct {
 	Context string             `json:"@odata.context"`
-	Value   []FormODataEntitySet `json:"value"`
+	Value   []ODataServiceItem `json:"value"`
 }
 
-type FormODataEntitySet struct {
-	Kind string `json:"kind"`
+type ODataServiceItem struct {
 	Name string `json:"name"`
+	Kind string `json:"kind"`
 	URL  string `json:"url"`
+}
+
+type FormTable struct {
+	ODataName string
+	ODataURL  string
+	SQLName   string
+	IsRoot    bool
 }
 
 func listProjectForms(client *CentralClient, projectID int) ([]CentralForm, error) {
@@ -67,7 +75,7 @@ func formExists(client *CentralClient, projectID int, xmlFormID string) (bool, e
 	return false, nil
 }
 
-func getFormODataServiceDocument(client *CentralClient, projectID int, xmlFormID string) (*FormODataServiceDocument, error) {
+func getFormODataServiceDocument(client *CentralClient, projectID int, xmlFormID string) (*ODataServiceDocument, error) {
 	url := fmt.Sprintf("%s/v1/projects/%d/forms/%s.svc", client.BaseURL, projectID, xmlFormID)
 
 	resp, err := client.Get(url)
@@ -85,10 +93,55 @@ func getFormODataServiceDocument(client *CentralClient, projectID int, xmlFormID
 		return nil, fmt.Errorf("non-OK response from form OData service document: %s - %s", resp.Status, string(body))
 	}
 
-	var doc FormODataServiceDocument
+	var doc ODataServiceDocument
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("failed to decode form OData service document: %w", err)
 	}
 
 	return &doc, nil
+}
+
+func getFormTables(client *CentralClient, projectID int, xmlFormID string, rootTableName string) ([]FormTable, error) {
+	doc, err := getFormODataServiceDocument(client, projectID, xmlFormID)
+	if err != nil {
+		return nil, err
+	}
+
+	var tables []FormTable
+
+	for _, item := range doc.Value {
+		if item.Kind != "EntitySet" {
+			continue
+		}
+
+		sqlName, isRoot, err := buildFormTableSQLName(rootTableName, item.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		tables = append(tables, FormTable{
+			ODataName: item.Name,
+			ODataURL:  item.URL,
+			SQLName:   sqlName,
+			IsRoot:    isRoot,
+		})
+	}
+
+	return tables, nil
+}
+
+func buildFormTableSQLName(rootTableName string, odataName string) (string, bool, error) {
+	if odataName == "Submissions" {
+		return rootTableName, true, nil
+	}
+
+	prefix := "Submissions."
+	if !strings.HasPrefix(odataName, prefix) {
+		return "", false, fmt.Errorf("unsupported OData table name: %s", odataName)
+	}
+
+	suffix := strings.TrimPrefix(odataName, prefix)
+	suffix = strings.ReplaceAll(suffix, ".", "__")
+
+	return rootTableName + "__" + suffix, false, nil
 }

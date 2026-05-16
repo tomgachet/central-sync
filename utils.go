@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -28,6 +30,12 @@ func extractOptionalInt(raw interface{}) (*int, error) {
 		return &i, nil
 	case int:
 		return &v, nil
+	case int32:
+		i := int(v)
+		return &i, nil
+	case int64:
+		i := int(v)
+		return &i, nil
 	case string:
 		var i int
 		_, err := fmt.Sscanf(v, "%d", &i)
@@ -64,4 +72,16 @@ func mustInt(raw interface{}) *int {
 		return nil
 	}
 	return val
+}
+
+func trimUUIDPrefix(value string) string {
+	return strings.TrimPrefix(value, "uuid:")
+}
+
+func sortStrings(values []string) {
+	sort.Strings(values)
+}
+
+func stringsJoin(values []string, sep string) string {
+	return strings.Join(values, sep)
 }

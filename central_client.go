@@ -33,7 +33,11 @@ func newCentralClient() (*CentralClient, error) {
 }
 
 func (c *CentralClient) Get(url string) (*http.Response, error) {
-	resp, err := c.doGet(url, c.Token)
+	return c.GetWithAccept(url, "application/json")
+}
+
+func (c *CentralClient) GetWithAccept(url string, accept string) (*http.Response, error) {
+	resp, err := c.doGetWithAccept(url, c.Token, accept)
 	if err != nil {
 		return nil, err
 	}
@@ -49,17 +53,21 @@ func (c *CentralClient) Get(url string) (*http.Response, error) {
 		return nil, fmt.Errorf("failed to refresh Central token after 401: %w", err)
 	}
 
-	return c.doGet(url, c.Token)
+	return c.doGetWithAccept(url, c.Token, accept)
 }
 
-func (c *CentralClient) doGet(url string, token string) (*http.Response, error) {
+func (c *CentralClient) doGetWithAccept(url string, token string, accept string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GET request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
+
+	if accept == "" {
+		accept = "application/json"
+	}
+	req.Header.Set("Accept", accept)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

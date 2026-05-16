@@ -67,7 +67,7 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 
 func syncSingleForm(db DBExecutor, project ProjectMapping, form FormMapping, client *CentralClient) error {
 	fmt.Printf(
-		"\nSyncing form %s -> table %s\n",
+		"\nSyncing form %s -> root table %s\n",
 		form.XMLFormID,
 		form.TableName,
 	)
@@ -81,29 +81,78 @@ func syncSingleForm(db DBExecutor, project ProjectMapping, form FormMapping, cli
 		return fmt.Errorf("form %s does not exist in ODK Central", form.XMLFormID)
 	}
 
-	err = ensureSubmissionTableExists(db, form.TableName)
+	formTables, err := getFormTables(client, project.ProjectID, form.XMLFormID, form.TableName)
 	if err != nil {
-		return fmt.Errorf("submission table error for form %s: %w", form.XMLFormID, err)
+		return fmt.Errorf("failed to discover OData tables for form %s: %w", form.XMLFormID, err)
 	}
 
-	err = ensureSubmissionTechnicalColumnsExist(db, form.TableName)
+	doc, err := getFormMetadataDocument(client, project.ProjectID, form.XMLFormID)
 	if err != nil {
-		return fmt.Errorf("submission technical column error for form %s: %w", form.XMLFormID, err)
+		return fmt.Errorf("failed to load metadata for form %s: %w", form.XMLFormID, err)
 	}
 
-	rows, err := getAllFormSubmissions(client, project.ProjectID, form.XMLFormID)
+	parsedMetadata, err := parseFormMetadata(doc, formTables)
 	if err != nil {
-		return fmt.Errorf("failed to fetch submissions for form %s: %w", form.XMLFormID, err)
+		return fmt.Errorf("failed to parse metadata for form %s: %w", form.XMLFormID, err)
 	}
 
-	err = syncFormSubmissions(db, form.TableName, rows)
+	for _, formTable := range formTables {
+		tableSchema, ok := parsedMetadata.Tables[formTable.ODataName]
+		if !ok {
+			return fmt.Errorf("missing parsed schema for OData table %s", formTable.ODataName)
+		}
+
+		err := syncSingleFormTable(db, project, form, formTable, tableSchema, client)
+		if err != nil {
+			fmt.Println("Form table sync error:", err)
+		}
+	}
+
+	return nil
+}
+
+func syncSingleFormTable(
+	db DBExecutor,
+	project ProjectMapping,
+	form FormMapping,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	client *CentralClient,
+) error {
+	fmt.Printf(
+		"  Syncing OData table %s -> SQL table %s\n",
+		formTable.ODataName,
+		formTable.SQLName,
+	)
+
+	err := ensureSubmissionTableExists(db, formTable)
 	if err != nil {
-		return fmt.Errorf("failed to sync submissions for form %s: %w", form.XMLFormID, err)
+		return fmt.Errorf("submission table error for form table %s: %w", formTable.ODataName, err)
+	}
+
+	err = ensureSubmissionTechnicalColumnsExist(db, formTable)
+	if err != nil {
+		return fmt.Errorf("submission technical column error for form table %s: %w", formTable.ODataName, err)
+	}
+
+	rows, err := getAllFormTableRows(client, project.ProjectID, form.XMLFormID, formTable.ODataURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
+	}
+
+	err = ensureSubmissionPropertyColumnsExist(db, formTable, tableSchema)
+	if err != nil {
+		return fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
+	}
+
+	err = syncFormTableRows(db, formTable, tableSchema, rows)
+	if err != nil {
+		return fmt.Errorf("failed to sync rows for form table %s: %w", formTable.ODataName, err)
 	}
 
 	fmt.Printf(
-		"Form %s synced successfully: %d submissions\n",
-		form.XMLFormID,
+		"  Form table %s synced successfully: %d rows\n",
+		formTable.ODataName,
 		len(rows),
 	)
 
