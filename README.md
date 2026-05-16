@@ -3,7 +3,7 @@ A Go program for synchronizing data from a ODK Central instance into a PostgreSQ
 
 ## Features
 - Configuration settings in a YAML file
-- Synchronization of datasets (entity lists) and form submissions
+- Synchronization of datasets (entity lists) and form submissions, including repeats
 - Automatic evolution of database tables linked to form updates in ODK Central
 - Storage of geometries in GeoJSON format
 - Simple binary to execute with no dependencies
