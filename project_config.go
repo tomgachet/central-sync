@@ -7,6 +7,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	SyncModeAppendOnly = "append_only"
+	SyncModeUpsert     = "upsert"
+)
+
 type DatasetMapping struct {
 	Name      string `yaml:"name"`
 	TableName string `yaml:"table_name"`
@@ -17,6 +22,7 @@ type FormMapping struct {
 	XMLFormID string `yaml:"xml_form_id"`
 	TableName string `yaml:"table_name"`
 	Sync      bool   `yaml:"sync"`
+	SyncMode  string `yaml:"sync_mode"`
 }
 
 type ProjectMapping struct {
@@ -67,4 +73,13 @@ func getFormsToSync(project ProjectMapping) []FormMapping {
 	}
 
 	return formsToSync
+}
+
+func getFormSyncMode(form FormMapping) string {
+	switch form.SyncMode {
+	case SyncModeAppendOnly, SyncModeUpsert:
+		return form.SyncMode
+	default:
+		return SyncModeAppendOnly
+	}
 }

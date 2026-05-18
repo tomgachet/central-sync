@@ -67,9 +67,10 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 
 func syncSingleForm(db DBExecutor, project ProjectMapping, form FormMapping, client *CentralClient) error {
 	fmt.Printf(
-		"\nSyncing form %s -> root table %s\n",
+		"\nSyncing form %s -> root table %s (mode=%s)\n",
 		form.XMLFormID,
 		form.TableName,
+		getFormSyncMode(form),
 	)
 
 	exists, err := formExists(client, project.ProjectID, form.XMLFormID)
@@ -96,13 +97,15 @@ func syncSingleForm(db DBExecutor, project ProjectMapping, form FormMapping, cli
 		return fmt.Errorf("failed to parse metadata for form %s: %w", form.XMLFormID, err)
 	}
 
+	syncMode := getFormSyncMode(form)
+
 	for _, formTable := range formTables {
 		tableSchema, ok := parsedMetadata.Tables[formTable.ODataName]
 		if !ok {
 			return fmt.Errorf("missing parsed schema for OData table %s", formTable.ODataName)
 		}
 
-		err := syncSingleFormTable(db, project, form, formTable, tableSchema, client)
+		err := syncSingleFormTable(db, project, form, formTable, tableSchema, syncMode, client)
 		if err != nil {
 			fmt.Println("Form table sync error:", err)
 		}
@@ -117,12 +120,14 @@ func syncSingleFormTable(
 	form FormMapping,
 	formTable FormTable,
 	tableSchema FormTableSchema,
+	syncMode string,
 	client *CentralClient,
 ) error {
 	fmt.Printf(
-		"  Syncing OData table %s -> SQL table %s\n",
+		"  Syncing OData table %s -> SQL table %s (mode=%s)\n",
 		formTable.ODataName,
 		formTable.SQLName,
+		syncMode,
 	)
 
 	err := ensureSubmissionTableExists(db, formTable)
@@ -145,7 +150,7 @@ func syncSingleFormTable(
 		return fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
 	}
 
-	err = syncFormTableRows(db, formTable, tableSchema, rows)
+	err = syncFormTableRows(db, formTable, tableSchema, syncMode, rows)
 	if err != nil {
 		return fmt.Errorf("failed to sync rows for form table %s: %w", formTable.ODataName, err)
 	}

@@ -1,19 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 )
 
-func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, rows []map[string]interface{}) error {
+func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, rows []map[string]interface{}) error {
 	insertedCount := 0
 	updatedCount := 0
 	skippedCount := 0
 
 	for _, row := range rows {
-		action, err := upsertFormTableRow(db, formTable, tableSchema, row)
+		action, err := upsertFormTableRow(db, formTable, tableSchema, syncMode, row)
 		if err != nil {
 			return err
 		}
@@ -40,17 +41,41 @@ func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTable
 	return nil
 }
 
-func upsertFormTableRow(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, row map[string]interface{}) (string, error) {
+func upsertFormTableRow(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, row map[string]interface{}) (string, error) {
 	shape, err := analyzeSubmissionRow(formTable, row)
 	if err != nil {
 		return "", err
 	}
 
 	if shape.Kind == SubmissionTableRoot {
+		if syncMode == SyncModeAppendOnly {
+			return insertOnlyRootSubmissionRow(db, formTable, tableSchema, row, shape)
+		}
 		return upsertRootSubmissionRow(db, formTable, tableSchema, row, shape)
 	}
 
+	if syncMode == SyncModeAppendOnly {
+		return insertOnlyRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+	}
 	return upsertRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+}
+
+func insertOnlyRootSubmissionRow(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	row map[string]interface{},
+	shape *SubmissionRowShape,
+) (string, error) {
+	exists, err := rootSubmissionRowExists(db, formTable.SQLName, shape.RowUUID)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "skipped", nil
+	}
+
+	return doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, false)
 }
 
 func upsertRootSubmissionRow(
@@ -72,6 +97,22 @@ func upsertRootSubmissionRow(
 
 	if exists && rootSubmissionStateUnchanged(existingState, systemData) {
 		return "skipped", nil
+	}
+
+	return doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, exists)
+}
+
+func doInsertOrUpdateRootSubmissionRow(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	row map[string]interface{},
+	shape *SubmissionRowShape,
+	alreadyExists bool,
+) (string, error) {
+	systemData, err := getSubmissionSystemData(row)
+	if err != nil {
+		return "", err
 	}
 
 	dataJSON, err := json.Marshal(row)
@@ -162,14 +203,13 @@ func upsertRootSubmissionRow(
 		return "", fmt.Errorf("failed to upsert root submission row %s: %w", shape.RowUUID, err)
 	}
 
-	if exists {
+	if alreadyExists {
 		return "updated", nil
 	}
-
 	return "inserted", nil
 }
 
-func upsertRepeatSubmissionRow(
+func insertOnlyRepeatSubmissionRow(
 	db DBExecutor,
 	formTable FormTable,
 	tableSchema FormTableSchema,
@@ -180,16 +220,61 @@ func upsertRepeatSubmissionRow(
 	if err != nil {
 		return "", err
 	}
-
 	if exists {
 		return "skipped", nil
 	}
 
-	dataJSON, err := json.Marshal(row)
+	return doInsertOrUpdateRepeatSubmissionRow(db, formTable, tableSchema, row, shape, false)
+}
+
+func upsertRepeatSubmissionRow(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	row map[string]interface{},
+	shape *SubmissionRowShape,
+) (string, error) {
+	storedJSON, exists, err := getStoredRepeatSubmissionJSON(db, formTable.SQLName, shape.RowUUID)
+	if err != nil {
+		return "", err
+	}
+
+	currentJSON, err := json.Marshal(row)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal repeat submission JSON: %w", err)
 	}
 
+	if exists && bytes.Equal(storedJSON, currentJSON) {
+		return "skipped", nil
+	}
+
+	return doInsertOrUpdateRepeatSubmissionRowWithJSON(db, formTable, tableSchema, currentJSON, shape, exists)
+}
+
+func doInsertOrUpdateRepeatSubmissionRow(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	row map[string]interface{},
+	shape *SubmissionRowShape,
+	alreadyExists bool,
+) (string, error) {
+	currentJSON, err := json.Marshal(row)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal repeat submission JSON: %w", err)
+	}
+
+	return doInsertOrUpdateRepeatSubmissionRowWithJSON(db, formTable, tableSchema, currentJSON, shape, alreadyExists)
+}
+
+func doInsertOrUpdateRepeatSubmissionRowWithJSON(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	dataJSON []byte,
+	shape *SubmissionRowShape,
+	alreadyExists bool,
+) (string, error) {
 	propertyColumns, propertyValues := buildTypedSubmissionPropertyValues(tableSchema, shape.FlatProperties)
 
 	columns := []string{
@@ -206,26 +291,40 @@ func upsertRepeatSubmissionRow(
 		time.Now().UTC(),
 	}
 
+	updateAssignments := []string{
+		`"parent_row_uuid" = EXCLUDED."parent_row_uuid"`,
+		`"data_json" = EXCLUDED."data_json"`,
+		`"synced_at" = EXCLUDED."synced_at"`,
+	}
+
 	for _, propertyColumn := range propertyColumns {
 		columns = append(columns, propertyColumn)
 		values = append(values, propertyValues[propertyColumn])
+		updateAssignments = append(
+			updateAssignments,
+			fmt.Sprintf("%s = EXCLUDED.%s", quoteIdentifier(propertyColumn), quoteIdentifier(propertyColumn)),
+		)
 	}
 
 	query := fmt.Sprintf(
 		`INSERT INTO %s.%s (%s) VALUES (%s)
 		 ON CONFLICT ("row_uuid")
-		 DO NOTHING`,
+		 DO UPDATE SET %s`,
 		quoteIdentifier(submissionSchema),
 		quoteIdentifier(formTable.SQLName),
 		buildQuotedColumnList(columns),
 		buildPlaceholders(len(values)),
+		stringsJoin(updateAssignments, ", "),
 	)
 
-	_, err = db.Exec(query, values...)
+	_, err := db.Exec(query, values...)
 	if err != nil {
-		return "", fmt.Errorf("failed to insert repeat submission row %s: %w", shape.RowUUID, err)
+		return "", fmt.Errorf("failed to upsert repeat submission row %s: %w", shape.RowUUID, err)
 	}
 
+	if alreadyExists {
+		return "updated", nil
+	}
 	return "inserted", nil
 }
 
@@ -343,6 +442,26 @@ func getStoredRootSubmissionState(db DBExecutor, tableName string, rowUUID strin
 	return &state, true, nil
 }
 
+func rootSubmissionRowExists(db DBExecutor, tableName string, rowUUID string) (bool, error) {
+	query := fmt.Sprintf(
+		`SELECT EXISTS (
+			SELECT 1
+			FROM %s.%s
+			WHERE "row_uuid" = $1
+		)`,
+		quoteIdentifier(submissionSchema),
+		quoteIdentifier(tableName),
+	)
+
+	var exists bool
+	err := db.QueryRow(query, rowUUID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check root row existence: %w", err)
+	}
+
+	return exists, nil
+}
+
 func repeatSubmissionRowExists(db DBExecutor, tableName string, rowUUID string) (bool, error) {
 	query := fmt.Sprintf(
 		`SELECT EXISTS (
@@ -361,6 +480,27 @@ func repeatSubmissionRowExists(db DBExecutor, tableName string, rowUUID string) 
 	}
 
 	return exists, nil
+}
+
+func getStoredRepeatSubmissionJSON(db DBExecutor, tableName string, rowUUID string) ([]byte, bool, error) {
+	query := fmt.Sprintf(
+		`SELECT "data_json"
+		 FROM %s.%s
+		 WHERE "row_uuid" = $1`,
+		quoteIdentifier(submissionSchema),
+		quoteIdentifier(tableName),
+	)
+
+	var data []byte
+	err := db.QueryRow(query, rowUUID).Scan(&data)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to read stored repeat submission JSON: %w", err)
+	}
+
+	return data, true, nil
 }
 
 func rootSubmissionStateUnchanged(stored *StoredRootSubmissionState, current *SubmissionSystemData) bool {
