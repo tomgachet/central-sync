@@ -130,35 +130,97 @@ func syncSingleFormTable(
 		syncMode,
 	)
 
-	err := ensureSubmissionTableExists(db, formTable)
+	syncRunID, err := startSyncRun(db, SyncRunStartParams{
+		ProjectID:    project.ProjectID,
+		FormXMLID:    &form.XMLFormID,
+		ObjectType:   "form_table",
+		ObjectName:   formTable.ODataName,
+		SQLTableName: formTable.SQLName,
+		SyncMode:     syncMode,
+	})
 	if err != nil {
+		return fmt.Errorf("failed to start sync run for form table %s: %w", formTable.ODataName, err)
+	}
+
+	err = ensureSubmissionTableExists(db, formTable)
+	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			ErrorMessage: &errorMessage,
+		})
 		return fmt.Errorf("submission table error for form table %s: %w", formTable.ODataName, err)
 	}
 
 	err = ensureSubmissionTechnicalColumnsExist(db, formTable)
 	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			ErrorMessage: &errorMessage,
+		})
 		return fmt.Errorf("submission technical column error for form table %s: %w", formTable.ODataName, err)
 	}
 
 	rows, err := getAllFormTableRows(client, project.ProjectID, form.XMLFormID, formTable.ODataURL)
 	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			ErrorMessage: &errorMessage,
+		})
 		return fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
 	}
 
 	err = ensureSubmissionPropertyColumnsExist(db, formTable, tableSchema)
 	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			ErrorMessage: &errorMessage,
+		})
 		return fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
 	}
 
-	err = syncFormTableRows(db, formTable, tableSchema, syncMode, rows)
+	stats, err := syncFormTableRows(db, formTable, tableSchema, syncMode, rows)
 	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:                 syncRunID,
+			SyncStatus:            "failed",
+			SyncOutSubmissionDate: nil,
+			SyncOutUpdatedAt:      nil,
+			RowsFetched:           len(rows),
+			ErrorMessage:          &errorMessage,
+		})
 		return fmt.Errorf("failed to sync rows for form table %s: %w", formTable.ODataName, err)
 	}
 
+	err = finishSyncRun(db, SyncRunFinishParams{
+		RunID:                 syncRunID,
+		SyncStatus:            "success",
+		SyncOutSubmissionDate: stats.SyncOutSubmissionDate,
+		SyncOutUpdatedAt:      stats.SyncOutUpdatedAt,
+		RowsFetched:           stats.RowsFetched,
+		RowsInserted:          stats.RowsInserted,
+		RowsUpdated:           stats.RowsUpdated,
+		RowsSkipped:           stats.RowsSkipped,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to finalize sync run for form table %s: %w", formTable.ODataName, err)
+	}
+
 	fmt.Printf(
-		"  Form table %s synced successfully: %d rows\n",
+		"  Form table %s synced successfully: fetched=%d inserted=%d updated=%d skipped=%d\n",
 		formTable.ODataName,
-		len(rows),
+		stats.RowsFetched,
+		stats.RowsInserted,
+		stats.RowsUpdated,
+		stats.RowsSkipped,
 	)
 
 	return nil

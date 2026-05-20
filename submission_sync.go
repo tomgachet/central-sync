@@ -8,56 +8,73 @@ import (
 	"time"
 )
 
-func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, rows []map[string]interface{}) error {
-	insertedCount := 0
-	updatedCount := 0
-	skippedCount := 0
+func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, rows []map[string]interface{}) (*SyncStats, error) {
+	stats := &SyncStats{
+		RowsFetched: len(rows),
+	}
 
 	for _, row := range rows {
-		action, err := upsertFormTableRow(db, formTable, tableSchema, syncMode, row)
+		action, rowSubmissionDate, rowUpdatedAt, err := upsertFormTableRow(db, formTable, tableSchema, syncMode, row)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		switch action {
 		case "inserted":
-			insertedCount++
+			stats.RowsInserted++
 		case "updated":
-			updatedCount++
+			stats.RowsUpdated++
 		case "skipped":
-			skippedCount++
+			stats.RowsSkipped++
+		}
+
+		if formTable.IsRoot {
+			stats.SyncOutSubmissionDate = maxTimePtr(stats.SyncOutSubmissionDate, rowSubmissionDate)
+			stats.SyncOutUpdatedAt = maxTimePtr(stats.SyncOutUpdatedAt, rowUpdatedAt)
 		}
 	}
 
 	fmt.Printf(
-		"Sync summary for %s.%s: inserted=%d updated=%d skipped=%d\n",
+		"Sync summary for %s.%s: fetched=%d inserted=%d updated=%d skipped=%d\n",
 		submissionSchema,
 		formTable.SQLName,
-		insertedCount,
-		updatedCount,
-		skippedCount,
+		stats.RowsFetched,
+		stats.RowsInserted,
+		stats.RowsUpdated,
+		stats.RowsSkipped,
 	)
 
-	return nil
+	return stats, nil
 }
 
-func upsertFormTableRow(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, row map[string]interface{}) (string, error) {
+func upsertFormTableRow(
+	db DBExecutor,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	syncMode string,
+	row map[string]interface{},
+) (string, *time.Time, *time.Time, error) {
 	shape, err := analyzeSubmissionRow(formTable, row)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 
 	if shape.Kind == SubmissionTableRoot {
 		if syncMode == SyncModeAppendOnly {
-			return insertOnlyRootSubmissionRow(db, formTable, tableSchema, row, shape)
+			action, submissionDate, updatedAt, err := insertOnlyRootSubmissionRow(db, formTable, tableSchema, row, shape)
+			return action, submissionDate, updatedAt, err
 		}
-		return upsertRootSubmissionRow(db, formTable, tableSchema, row, shape)
+		action, submissionDate, updatedAt, err := upsertRootSubmissionRow(db, formTable, tableSchema, row, shape)
+		return action, submissionDate, updatedAt, err
 	}
 
 	if syncMode == SyncModeAppendOnly {
-		return insertOnlyRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+		action, err := insertOnlyRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+		return action, nil, nil, err
 	}
-	return upsertRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+
+	action, err := upsertRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
+	return action, nil, nil, err
 }
 
 func insertOnlyRootSubmissionRow(
@@ -66,16 +83,22 @@ func insertOnlyRootSubmissionRow(
 	tableSchema FormTableSchema,
 	row map[string]interface{},
 	shape *SubmissionRowShape,
-) (string, error) {
-	exists, err := rootSubmissionRowExists(db, formTable.SQLName, shape.RowUUID)
+) (string, *time.Time, *time.Time, error) {
+	systemData, err := getSubmissionSystemData(row)
 	if err != nil {
-		return "", err
-	}
-	if exists {
-		return "skipped", nil
+		return "", nil, nil, err
 	}
 
-	return doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, false)
+	exists, err := rootSubmissionRowExists(db, formTable.SQLName, shape.RowUUID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if exists {
+		return "skipped", systemData.SubmissionDate, systemData.UpdatedAt, nil
+	}
+
+	action, err := doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, false)
+	return action, systemData.SubmissionDate, systemData.UpdatedAt, err
 }
 
 func upsertRootSubmissionRow(
@@ -84,22 +107,23 @@ func upsertRootSubmissionRow(
 	tableSchema FormTableSchema,
 	row map[string]interface{},
 	shape *SubmissionRowShape,
-) (string, error) {
+) (string, *time.Time, *time.Time, error) {
 	systemData, err := getSubmissionSystemData(row)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 
 	existingState, exists, err := getStoredRootSubmissionState(db, formTable.SQLName, shape.RowUUID)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 
 	if exists && rootSubmissionStateUnchanged(existingState, systemData) {
-		return "skipped", nil
+		return "skipped", systemData.SubmissionDate, systemData.UpdatedAt, nil
 	}
 
-	return doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, exists)
+	action, err := doInsertOrUpdateRootSubmissionRow(db, formTable, tableSchema, row, shape, exists)
+	return action, systemData.SubmissionDate, systemData.UpdatedAt, err
 }
 
 func doInsertOrUpdateRootSubmissionRow(
@@ -654,4 +678,15 @@ func convertSubmissionPropertyValue(raw interface{}, sqlType string) interface{}
 			return string(bytes)
 		}
 	}
+}
+
+func maxTimePtr(current *time.Time, candidate *time.Time) *time.Time {
+	if candidate == nil {
+		return current
+	}
+	if current == nil || candidate.After(*current) {
+		t := *candidate
+		return &t
+	}
+	return current
 }
