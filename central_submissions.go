@@ -15,7 +15,13 @@ type ODataTableRowsResponse struct {
 	Value    []map[string]interface{} `json:"value"`
 }
 
-func getFormTableRows(client *CentralClient, projectID int, xmlFormID string, odataTableURL string) (*ODataTableRowsResponse, error) {
+func getFormTableRows(
+	client *CentralClient,
+	projectID int,
+	xmlFormID string,
+	odataTableURL string,
+	filter string,
+) (*ODataTableRowsResponse, error) {
 	base := fmt.Sprintf(
 		"%s/v1/projects/%d/forms/%s.svc/%s",
 		client.BaseURL,
@@ -28,11 +34,21 @@ func getFormTableRows(client *CentralClient, projectID int, xmlFormID string, od
 	params.Set("$top", "1000")
 	params.Set("$count", "true")
 
+	if filter != "" {
+		params.Set("$filter", filter)
+	}
+
 	return fetchFormTableRowsPage(client, base+"?"+params.Encode())
 }
 
-func getAllFormTableRows(client *CentralClient, projectID int, xmlFormID string, odataTableURL string) ([]map[string]interface{}, error) {
-	firstPage, err := getFormTableRows(client, projectID, xmlFormID, odataTableURL)
+func getAllFormTableRows(
+	client *CentralClient,
+	projectID int,
+	xmlFormID string,
+	odataTableURL string,
+	filter string,
+) ([]map[string]interface{}, error) {
+	firstPage, err := getFormTableRows(client, projectID, xmlFormID, odataTableURL, filter)
 	if err != nil {
 		return nil, err
 	}

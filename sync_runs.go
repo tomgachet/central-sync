@@ -76,7 +76,7 @@ func startSyncRun(db DBExecutor, params SyncRunStartParams) (int64, error) {
 			sync_in_submission_date,
 			sync_in_updated_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING run_id
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -169,10 +169,7 @@ func getLastSuccessfulSyncRun(
 		WHERE project_id = $1
 		  AND object_type = $2
 		  AND object_name = $3
-		  AND (
-			($4 IS NULL AND form_xml_id IS NULL)
-			OR form_xml_id = $4
-		  )
+		  AND form_xml_id IS NOT DISTINCT FROM $4::text
 		LIMIT 1
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -243,4 +240,18 @@ func getLastSuccessfulSyncRun(
 	}
 
 	return &run, nil
+}
+
+func getLastSuccessfulSubmissionRootRun(
+	db DBExecutor,
+	projectID int,
+	formXMLID string,
+) (*SyncRun, error) {
+	return getLastSuccessfulSyncRun(
+		db,
+		projectID,
+		&formXMLID,
+		"form_table",
+		"Submissions",
+	)
 }

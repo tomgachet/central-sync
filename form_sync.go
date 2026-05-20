@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func syncAllForms(projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
@@ -99,13 +102,18 @@ func syncSingleForm(db DBExecutor, project ProjectMapping, form FormMapping, cli
 
 	syncMode := getFormSyncMode(form)
 
+	lastRootRun, err := getLastSuccessfulSubmissionRootRun(db, project.ProjectID, form.XMLFormID)
+	if err != nil {
+		return fmt.Errorf("failed to read last successful submission root run for form %s: %w", form.XMLFormID, err)
+	}
+
 	for _, formTable := range formTables {
 		tableSchema, ok := parsedMetadata.Tables[formTable.ODataName]
 		if !ok {
 			return fmt.Errorf("missing parsed schema for OData table %s", formTable.ODataName)
 		}
 
-		err := syncSingleFormTable(db, project, form, formTable, tableSchema, syncMode, client)
+		err := syncSingleFormTable(db, project, form, formTable, tableSchema, syncMode, lastRootRun, client)
 		if err != nil {
 			fmt.Println("Form table sync error:", err)
 		}
@@ -121,6 +129,7 @@ func syncSingleFormTable(
 	formTable FormTable,
 	tableSchema FormTableSchema,
 	syncMode string,
+	lastRootRun *SyncRun,
 	client *CentralClient,
 ) error {
 	fmt.Printf(
@@ -130,13 +139,23 @@ func syncSingleFormTable(
 		syncMode,
 	)
 
+	var syncInSubmissionDate *time.Time
+	var syncInUpdatedAt *time.Time
+
+	if lastRootRun != nil {
+		syncInSubmissionDate = lastRootRun.SyncOutSubmissionDate
+		syncInUpdatedAt = lastRootRun.SyncOutUpdatedAt
+	}
+
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
-		ProjectID:    project.ProjectID,
-		FormXMLID:    &form.XMLFormID,
-		ObjectType:   "form_table",
-		ObjectName:   formTable.ODataName,
-		SQLTableName: formTable.SQLName,
-		SyncMode:     syncMode,
+		ProjectID:            project.ProjectID,
+		FormXMLID:            &form.XMLFormID,
+		ObjectType:           "form_table",
+		ObjectName:           formTable.ODataName,
+		SQLTableName:         formTable.SQLName,
+		SyncMode:             syncMode,
+		SyncInSubmissionDate: syncInSubmissionDate,
+		SyncInUpdatedAt:      syncInUpdatedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start sync run for form table %s: %w", formTable.ODataName, err)
@@ -164,7 +183,24 @@ func syncSingleFormTable(
 		return fmt.Errorf("submission technical column error for form table %s: %w", formTable.ODataName, err)
 	}
 
-	rows, err := getAllFormTableRows(client, project.ProjectID, form.XMLFormID, formTable.ODataURL)
+	filter := ""
+	if formTable.IsRoot {
+		filter = buildSubmissionRootFilter(lastRootRun, syncMode)
+	} else {
+		filter = buildSubmissionRepeatFilter(lastRootRun, syncMode)
+	}
+
+	if filter != "" {
+		fmt.Printf("    Applying filter: %s\n", filter)
+	}
+
+	rows, err := getAllFormTableRows(
+		client,
+		project.ProjectID,
+		form.XMLFormID,
+		formTable.ODataURL,
+		filter,
+	)
 	if err != nil {
 		errorMessage := err.Error()
 		_ = finishSyncRun(db, SyncRunFinishParams{
@@ -200,11 +236,23 @@ func syncSingleFormTable(
 		return fmt.Errorf("failed to sync rows for form table %s: %w", formTable.ODataName, err)
 	}
 
+	// Correction importante :
+	// si aucun nouvel enregistrement n'a été traité, on conserve les bornes d'entrée.
+	effectiveOutSubmissionDate := stats.SyncOutSubmissionDate
+	effectiveOutUpdatedAt := stats.SyncOutUpdatedAt
+
+	if effectiveOutSubmissionDate == nil {
+		effectiveOutSubmissionDate = syncInSubmissionDate
+	}
+	if effectiveOutUpdatedAt == nil {
+		effectiveOutUpdatedAt = syncInUpdatedAt
+	}
+
 	err = finishSyncRun(db, SyncRunFinishParams{
 		RunID:                 syncRunID,
 		SyncStatus:            "success",
-		SyncOutSubmissionDate: stats.SyncOutSubmissionDate,
-		SyncOutUpdatedAt:      stats.SyncOutUpdatedAt,
+		SyncOutSubmissionDate: effectiveOutSubmissionDate,
+		SyncOutUpdatedAt:      effectiveOutUpdatedAt,
 		RowsFetched:           stats.RowsFetched,
 		RowsInserted:          stats.RowsInserted,
 		RowsUpdated:           stats.RowsUpdated,
