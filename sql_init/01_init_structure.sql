@@ -35,6 +35,7 @@ SELECT DISTINCT ON (project_id, form_xml_id, object_type, object_name)
     sync_mode,
     started_at,
     finished_at,
+    sync_status,
     sync_in_submission_date,
     sync_in_updated_at,
     sync_out_submission_date,
@@ -42,7 +43,8 @@ SELECT DISTINCT ON (project_id, form_xml_id, object_type, object_name)
     rows_fetched,
     rows_inserted,
     rows_updated,
-    rows_skipped
+    rows_skipped,
+    error_message
 FROM central_metadata.sync_runs
 WHERE sync_status = 'success'
 ORDER BY
