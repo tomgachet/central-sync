@@ -72,6 +72,11 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		dataset.TableName,
 	)
 
+	lastDatasetSync, err := getLastSuccessfulDatasetSync(db, project.ProjectID, dataset.Name)
+	if err != nil {
+		return fmt.Errorf("failed to read last successful dataset sync for dataset %s: %w", dataset.Name, err)
+	}
+
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
 		ProjectID:    project.ProjectID,
 		FormXMLID:    nil,
@@ -128,7 +133,12 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("property column error for dataset %s: %w", dataset.Name, err)
 	}
 
-	entities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name)
+	filter := buildDatasetFilter(lastDatasetSync)
+	if filter != "" {
+		fmt.Printf("  Applying dataset filter: %s\n", filter)
+	}
+
+	entities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name, filter)
 	if err != nil {
 		errorMessage := err.Error()
 		_ = finishSyncRun(db, SyncRunFinishParams{
@@ -152,27 +162,34 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 
 	geometryGeoJSONByEntityID := buildGeometryGeoJSONMap(geojsonCollection)
 
-	stats, err := syncDatasetEntities(db, dataset.TableName, entities, metadata.Properties, geometryGeoJSONByEntityID)
+	stats, err := syncDatasetEntities(
+	db,
+	syncRunID,
+	project.ProjectID,
+	dataset.TableName,
+	dataset.Name,
+	entities,
+	metadata.Properties,
+	geometryGeoJSONByEntityID,
+	)
 	if err != nil {
 		errorMessage := err.Error()
 		_ = finishSyncRun(db, SyncRunFinishParams{
-			RunID:            syncRunID,
-			SyncStatus:       "failed",
-			SyncOutUpdatedAt: nil,
-			RowsFetched:      len(entities),
-			ErrorMessage:     &errorMessage,
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			RowsFetched:  len(entities),
+			ErrorMessage: &errorMessage,
 		})
 		return fmt.Errorf("entity sync error for dataset %s: %w", dataset.Name, err)
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
-		RunID:            syncRunID,
-		SyncStatus:       "success",
-		SyncOutUpdatedAt: stats.SyncOutUpdatedAt,
-		RowsFetched:      stats.RowsFetched,
-		RowsInserted:     stats.RowsInserted,
-		RowsUpdated:      stats.RowsUpdated,
-		RowsSkipped:      stats.RowsSkipped,
+		RunID:        syncRunID,
+		SyncStatus:   "success",
+		RowsFetched:  stats.RowsFetched,
+		RowsInserted: stats.RowsInserted,
+		RowsUpdated:  stats.RowsUpdated,
+		RowsSkipped:  stats.RowsSkipped,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to finalize sync run for dataset %s: %w", dataset.Name, err)

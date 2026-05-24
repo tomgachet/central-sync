@@ -5,50 +5,50 @@ import (
 	"time"
 )
 
-func buildSubmissionRootFilter(lastRun *SyncRun, syncMode string) string {
-	return buildSubmissionFilter(lastRun, syncMode, "__system/")
+func buildSubmissionRootFilter(lastSync *LastSuccessfulSubmissionSync, syncMode string) string {
+	return buildSubmissionFilter(lastSync, syncMode, "__system/")
 }
 
-func buildSubmissionRepeatFilter(lastRun *SyncRun, syncMode string) string {
-	return buildSubmissionFilter(lastRun, syncMode, "$root/Submissions/__system/")
+func buildSubmissionRepeatFilter(lastSync *LastSuccessfulSubmissionSync, syncMode string) string {
+	return buildSubmissionFilter(lastSync, syncMode, "$root/Submissions/__system/")
 }
 
-func buildSubmissionFilter(lastRun *SyncRun, syncMode string, systemPrefix string) string {
-	if lastRun == nil {
+func buildSubmissionFilter(lastSync *LastSuccessfulSubmissionSync, syncMode string, systemPrefix string) string {
+	if lastSync == nil {
 		return ""
 	}
 
 	switch syncMode {
 	case SyncModeAppendOnly:
-		if lastRun.SyncOutSubmissionDate == nil {
+		if lastSync.MaxSubmissionDate == nil {
 			return ""
 		}
 
 		return fmt.Sprintf(
 			"%ssubmissionDate gt %s",
 			systemPrefix,
-			formatODataDateTime(*lastRun.SyncOutSubmissionDate),
+			formatODataDateTime(*lastSync.MaxSubmissionDate),
 		)
 
 	case SyncModeUpsert:
 		var parts []string
 
-		if lastRun.SyncOutSubmissionDate != nil {
+		if lastSync.MaxSubmissionDate != nil {
 			parts = append(parts,
 				fmt.Sprintf(
 					"%ssubmissionDate gt %s",
 					systemPrefix,
-					formatODataDateTime(*lastRun.SyncOutSubmissionDate),
+					formatODataDateTime(*lastSync.MaxSubmissionDate),
 				),
 			)
 		}
 
-		if lastRun.SyncOutUpdatedAt != nil {
+		if lastSync.MaxUpdatedAt != nil {
 			parts = append(parts,
 				fmt.Sprintf(
 					"%supdatedAt gt %s",
 					systemPrefix,
-					formatODataDateTime(*lastRun.SyncOutUpdatedAt),
+					formatODataDateTime(*lastSync.MaxUpdatedAt),
 				),
 			)
 		}

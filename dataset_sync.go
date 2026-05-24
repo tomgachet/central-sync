@@ -10,7 +10,10 @@ import (
 
 func syncDatasetEntities(
 	db DBExecutor,
+	runID int64,
+	projectID int,
 	tableName string,
+	datasetName string,
 	entities []map[string]interface{},
 	properties []DatasetProperty,
 	geometryGeoJSONByEntityID map[string]interface{},
@@ -20,8 +23,33 @@ func syncDatasetEntities(
 	}
 
 	for _, entity := range entities {
-		action, entityUpdatedAt, err := upsertDatasetEntity(db, tableName, entity, properties, geometryGeoJSONByEntityID)
+		action, entityUUID, entityCreatedAt, entityUpdatedAt, err := upsertDatasetEntity(
+			db,
+			tableName,
+			entity,
+			properties,
+			geometryGeoJSONByEntityID,
+		)
 		if err != nil {
+			errorMessage := err.Error()
+
+			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+				RunID:             runID,
+				ProjectID:         projectID,
+				FormXMLID:         nil,
+				ObjectType:        "dataset",
+				ObjectName:        datasetName,
+				SQLTableName:      tableName,
+				EntityUUID:        &entityUUID,
+				CentralCreatedAt:  entityCreatedAt,
+				CentralUpdatedAt:  entityUpdatedAt,
+				SyncAction:        "failed",
+				SyncStatus:        "failed",
+				RowsFetched:       1,
+				RowsFailed:        1,
+				ErrorMessage:      &errorMessage,
+			})
+
 			return nil, err
 		}
 
@@ -35,6 +63,27 @@ func syncDatasetEntities(
 		}
 
 		stats.SyncOutUpdatedAt = maxTimePtr(stats.SyncOutUpdatedAt, entityUpdatedAt)
+
+		err = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+			RunID:             runID,
+			ProjectID:         projectID,
+			FormXMLID:         nil,
+			ObjectType:        "dataset",
+			ObjectName:        datasetName,
+			SQLTableName:      tableName,
+			EntityUUID:        &entityUUID,
+			CentralCreatedAt:  entityCreatedAt,
+			CentralUpdatedAt:  entityUpdatedAt,
+			SyncAction:        action,
+			SyncStatus:        "success",
+			RowsFetched:       1,
+			RowsInserted:      boolToCount(action == "inserted"),
+			RowsUpdated:       boolToCount(action == "updated"),
+			RowsSkipped:       boolToCount(action == "skipped"),
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	fmt.Printf(
@@ -56,36 +105,36 @@ func upsertDatasetEntity(
 	entity map[string]interface{},
 	properties []DatasetProperty,
 	geometryGeoJSONByEntityID map[string]interface{},
-) (string, *time.Time, error) {
+) (string, string, *time.Time, *time.Time, error) {
 	entityUUID, err := getEntityUUID(entity)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, nil, err
 	}
 
 	label := getEntityLabel(entity)
 
 	systemData, err := getEntitySystemData(entity)
 	if err != nil {
-		return "", nil, err
+		return "", entityUUID, nil, nil, err
 	}
 
 	existingVersion, exists, err := getStoredEntityVersion(db, tableName, entityUUID)
 	if err != nil {
-		return "", nil, err
+		return "", entityUUID, nil, nil, err
 	}
 
 	if exists && existingVersion == systemData.Version {
-		return "skipped", systemData.UpdatedAt, nil
+		return "skipped", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
 	}
 
 	dataJSON, err := json.Marshal(entity)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to marshal entity JSON: %w", err)
+		return "", entityUUID, nil, nil, fmt.Errorf("failed to marshal entity JSON: %w", err)
 	}
 
 	geometryGeoJSONValue, err := buildGeometryGeoJSONValue(geometryGeoJSONByEntityID, entityUUID)
 	if err != nil {
-		return "", nil, err
+		return "", entityUUID, nil, nil, err
 	}
 
 	columns := []string{
@@ -172,7 +221,7 @@ func upsertDatasetEntity(
 
 	_, err = db.Exec(query, values...)
 	if err != nil {
-		return "", nil, fmt.Errorf(
+		return "", entityUUID, nil, nil, fmt.Errorf(
 			"failed to upsert entity %s into %s.%s: %w",
 			entityUUID,
 			datasetSchema,
@@ -182,10 +231,10 @@ func upsertDatasetEntity(
 	}
 
 	if exists {
-		return "updated", systemData.UpdatedAt, nil
+		return "updated", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
 	}
 
-	return "inserted", systemData.UpdatedAt, nil
+	return "inserted", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
 }
 
 type EntitySystemData struct {
@@ -357,4 +406,11 @@ func buildPlaceholders(count int) string {
 		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
 	}
 	return strings.Join(placeholders, ", ")
+}
+
+func boolToCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

@@ -16,6 +16,10 @@ GRANT ALL ON SCHEMA central_submissions TO your_central_user;
 GRANT ALL ON SCHEMA central_metadata TO your_central_user;
 
 ALTER TABLE central_metadata.sync_runs OWNER TO your_central_user;
-ALTER VIEW central_metadata.last_successful_sync_runs OWNER TO your_central_user;
+ALTER TABLE central_metadata.sync_runs_detail OWNER TO your_central_user;
+
+ALTER VIEW central_metadata.last_successful_submissions_sync OWNER TO your_central_user;
+ALTER VIEW central_metadata.last_successful_datasets_sync OWNER TO your_central_user;
+
 ALTER TABLE central_metadata.failed_submissions OWNER TO your_central_user;
 ALTER TABLE central_metadata.failed_dataset_entities OWNER TO your_central_user;

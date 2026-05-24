@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 type ODataEntitiesResponse struct {
@@ -14,19 +15,39 @@ type ODataEntitiesResponse struct {
 	Value    []map[string]interface{} `json:"value"`
 }
 
-func getDatasetEntities(client *CentralClient, projectID int, datasetName string) (*ODataEntitiesResponse, error) {
-	url := fmt.Sprintf(
-		"%s/v1/projects/%d/datasets/%s.svc/Entities?$top=1000&$count=true",
+func getDatasetEntities(
+	client *CentralClient,
+	projectID int,
+	datasetName string,
+	filter string,
+) (*ODataEntitiesResponse, error) {
+	baseURL := fmt.Sprintf(
+		"%s/v1/projects/%d/datasets/%s.svc/Entities",
 		client.BaseURL,
 		projectID,
 		datasetName,
 	)
 
-	return fetchDatasetEntitiesPage(client, url)
+	params := url.Values{}
+	params.Set("$top", "1000")
+	params.Set("$count", "true")
+
+	if filter != "" {
+		params.Set("$filter", filter)
+	}
+
+	requestURL := baseURL + "?" + params.Encode()
+
+	return fetchDatasetEntitiesPage(client, requestURL)
 }
 
-func getAllDatasetEntities(client *CentralClient, projectID int, datasetName string) ([]map[string]interface{}, error) {
-	firstPage, err := getDatasetEntities(client, projectID, datasetName)
+func getAllDatasetEntities(
+	client *CentralClient,
+	projectID int,
+	datasetName string,
+	filter string,
+) ([]map[string]interface{}, error) {
+	firstPage, err := getDatasetEntities(client, projectID, datasetName, filter)
 	if err != nil {
 		return nil, err
 	}
