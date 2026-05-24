@@ -44,6 +44,15 @@ type LastSuccessfulDatasetSync struct {
 	MaxUpdatedAt *time.Time
 }
 
+type FailedSubmissionRef struct {
+	ProjectID             int
+	FormXMLID             string
+	SubmissionUUID        string
+	CentralSubmissionDate *time.Time
+	CentralUpdatedAt      *time.Time
+	ErrorMessage          *string
+}
+
 func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error {
 	query := fmt.Sprintf(`
 		INSERT INTO %s.sync_runs_detail (
@@ -195,4 +204,69 @@ func getLastSuccessfulDatasetSync(
 	}
 
 	return &result, nil
+}
+
+func getLastFailedSubmissions(
+	db *sql.DB,
+	projectID int,
+	formXMLID string,
+) ([]FailedSubmissionRef, error) {
+	query := fmt.Sprintf(`
+		SELECT
+			project_id,
+			form_xml_id,
+			submission_uuid,
+			central_submission_date,
+			central_updated_at,
+			error_message
+		FROM %s.last_failed_submissions
+		WHERE project_id = $1
+		  AND form_xml_id = $2
+		ORDER BY central_submission_date NULLS LAST, submission_uuid
+	`, quoteIdentifier(syncMetadataSchema))
+
+	rows, err := db.Query(query, projectID, formXMLID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read last failed submissions: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FailedSubmissionRef
+
+	for rows.Next() {
+		var item FailedSubmissionRef
+		var submissionDate sql.NullTime
+		var updatedAt sql.NullTime
+		var errorMessage sql.NullString
+
+		err := rows.Scan(
+			&item.ProjectID,
+			&item.FormXMLID,
+			&item.SubmissionUUID,
+			&submissionDate,
+			&updatedAt,
+			&errorMessage,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan failed submission row: %w", err)
+		}
+
+		if submissionDate.Valid {
+			item.CentralSubmissionDate = &submissionDate.Time
+		}
+		if updatedAt.Valid {
+			item.CentralUpdatedAt = &updatedAt.Time
+		}
+		if errorMessage.Valid {
+			item.ErrorMessage = &errorMessage.String
+		}
+
+		results = append(results, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while iterating failed submissions: %w", err)
+	}
+
+	return results, nil
 }

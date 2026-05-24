@@ -94,3 +94,41 @@ func fetchFormTableRowsPage(client *CentralClient, requestURL string) (*ODataTab
 
 	return &result, nil
 }
+
+func getSubmissionRowsByUUIDs(
+	client *CentralClient,
+	projectID int,
+	xmlFormID string,
+	submissionUUIDs []string,
+) ([]map[string]interface{}, error) {
+	if len(submissionUUIDs) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]bool)
+	var allRows []map[string]interface{}
+
+	for _, submissionUUID := range submissionUUIDs {
+		if submissionUUID == "" || seen[submissionUUID] {
+			continue
+		}
+		seen[submissionUUID] = true
+
+		filter := fmt.Sprintf("__id eq 'uuid:%s'", submissionUUID)
+
+		rows, err := getAllFormTableRows(
+			client,
+			projectID,
+			xmlFormID,
+			"Submissions",
+			filter,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch submission %s: %w", submissionUUID, err)
+		}
+
+		allRows = append(allRows, rows...)
+	}
+
+	return allRows, nil
+}

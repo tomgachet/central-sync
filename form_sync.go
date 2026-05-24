@@ -107,6 +107,23 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 		return fmt.Errorf("failed to read last successful submissions sync for form %s: %w", form.XMLFormID, err)
 	}
 
+	failedSubmissions, err := getLastFailedSubmissions(db, project.ProjectID, form.XMLFormID)
+	if err != nil {
+		return fmt.Errorf("failed to read failed submissions for form %s: %w", form.XMLFormID, err)
+	}
+	failedSubmissionUUIDs := extractFailedSubmissionUUIDs(failedSubmissions)
+
+	failedRowsByTable, err := fetchFailedSubmissionRowsByTable(
+		client,
+		project.ProjectID,
+		form.XMLFormID,
+		formTables,
+		failedSubmissionUUIDs,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to fetch failed submission rows for form %s: %w", form.XMLFormID, err)
+	}
+
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
 		ProjectID:    project.ProjectID,
 		FormXMLID:    &form.XMLFormID,
@@ -194,6 +211,11 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 			return fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
 		}
 
+		failedRows := failedRowsByTable[formTable.ODataName]
+		if len(failedRows) > 0 {
+			rows = mergeSubmissionRows(rows, failedRows)
+		}
+
 		rowsByTable[formTable.ODataName] = rows
 	}
 
@@ -213,32 +235,33 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	var firstErrorMessage *string
 
 	for _, batch := range batches {
-		batchStats, err := syncSubmissionBatch(
-			db,
-			syncRunID,
-			project.ProjectID,
-			form.XMLFormID,
-			syncMode,
-			batch,
-		)
+	batchStats, err := syncSubmissionBatch(
+		db,
+		syncRunID,
+		project.ProjectID,
+		form.XMLFormID,
+		syncMode,
+		batch,
+	)
 
-		if batchStats != nil {
-			totalStats.RowsFetched += batchStats.RowsFetched
-			totalStats.RowsInserted += batchStats.RowsInserted
-			totalStats.RowsUpdated += batchStats.RowsUpdated
-			totalStats.RowsSkipped += batchStats.RowsSkipped
-			totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
-			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
+	if err != nil {
+		hadFailure = true
+		msg := err.Error()
+		if firstErrorMessage == nil {
+			firstErrorMessage = &msg
 		}
+		fmt.Printf("  Submission batch sync error for %s: %v\n", batch.RootSubmissionUUID, err)
+		continue
+	}
 
-		if err != nil {
-			hadFailure = true
-			msg := err.Error()
-			if firstErrorMessage == nil {
-				firstErrorMessage = &msg
-			}
-			fmt.Printf("  Submission batch sync error for %s: %v\n", batch.RootSubmissionUUID, err)
-		}
+	if batchStats != nil {
+		totalStats.RowsFetched += batchStats.RowsFetched
+		totalStats.RowsInserted += batchStats.RowsInserted
+		totalStats.RowsUpdated += batchStats.RowsUpdated
+		totalStats.RowsSkipped += batchStats.RowsSkipped
+		totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
+		totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
+	}
 	}
 
 	finalStatus := "success"
