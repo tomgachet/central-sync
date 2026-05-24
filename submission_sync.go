@@ -23,12 +23,18 @@ func syncFormTableRows(
 	}
 
 	for _, row := range rows {
+		shape, err := analyzeSubmissionRow(formTable, row)
+		if err != nil {
+			return nil, err
+		}		
+
 		action, submissionUUID, submissionDate, updatedAt, err := upsertFormTableRow(
 			db,
 			formTable,
 			tableSchema,
 			syncMode,
 			row,
+			shape,
 		)
 		if err != nil {
 			errorMessage := err.Error()
@@ -108,10 +114,10 @@ func upsertFormTableRow(
 	tableSchema FormTableSchema,
 	syncMode string,
 	row map[string]interface{},
+	shape *SubmissionRowShape,
 ) (string, *string, *time.Time, *time.Time, error) {
-	shape, err := analyzeSubmissionRow(formTable, row)
-	if err != nil {
-		return "", nil, nil, nil, err
+	if shape == nil {
+		return "", nil, nil, nil, fmt.Errorf("submission row shape is nil")
 	}
 
 	submissionUUID := buildSubmissionUUIDPtr(shape)

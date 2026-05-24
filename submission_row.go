@@ -38,13 +38,8 @@ func analyzeSubmissionRow(formTable FormTable, row map[string]interface{}) (*Sub
 	kind := detectSubmissionTableKind(formTable)
 
 	var parentRowUUID *string
-	rootSubmissionUUID := rowUUID
-
 	if kind == SubmissionTableRepeat {
 		parentRowUUID = extractSubmissionParentRowUUID(row)
-		if parentRowUUID != nil && *parentRowUUID != "" {
-			rootSubmissionUUID = *parentRowUUID
-		}
 	}
 
 	flatProperties := flattenSubmissionProperties(row)
@@ -53,7 +48,7 @@ func analyzeSubmissionRow(formTable FormTable, row map[string]interface{}) (*Sub
 		Kind:               kind,
 		RowUUID:            rowUUID,
 		ParentRowUUID:      parentRowUUID,
-		RootSubmissionUUID: rootSubmissionUUID,
+		RootSubmissionUUID: "",
 		FlatProperties:     flatProperties,
 	}, nil
 }
@@ -73,10 +68,19 @@ func extractSubmissionRowUUID(row map[string]interface{}) (string, error) {
 }
 
 func extractSubmissionParentRowUUID(row map[string]interface{}) *string {
-	var candidates []string
+	if raw, ok := row["__Submissions-id"]; ok {
+		if value, ok := raw.(string); ok && value != "" {
+			parent := trimUUIDPrefix(value)
+			return &parent
+		}
+	}
 
 	for key, raw := range row {
 		if key == "__id" {
+			continue
+		}
+
+		if key == "__Submissions-id" {
 			continue
 		}
 
@@ -89,16 +93,11 @@ func extractSubmissionParentRowUUID(row map[string]interface{}) *string {
 			continue
 		}
 
-		candidates = append(candidates, trimUUIDPrefix(value))
+		parent := trimUUIDPrefix(value)
+		return &parent
 	}
 
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	sort.Strings(candidates)
-	parent := candidates[0]
-	return &parent
+	return nil
 }
 
 func flattenSubmissionProperties(row map[string]interface{}) map[string]interface{} {
