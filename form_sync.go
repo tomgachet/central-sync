@@ -209,7 +209,16 @@ func syncSingleFormTable(
 		return fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
 	}
 
-	stats, err := syncFormTableRows(db, formTable, tableSchema, syncMode, rows)
+	stats, err := syncFormTableRows(
+	db,
+	syncRunID,
+	project.ProjectID,
+	form.XMLFormID,
+	formTable,
+	tableSchema,
+	syncMode,
+	rows,
+	)
 	if err != nil {
 		errorMessage := err.Error()
 		_ = finishSyncRun(db, SyncRunFinishParams{

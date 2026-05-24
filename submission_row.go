@@ -15,10 +15,11 @@ const (
 )
 
 type SubmissionRowShape struct {
-	Kind           SubmissionTableKind
-	RowUUID        string
-	ParentRowUUID  *string
-	FlatProperties map[string]interface{}
+	Kind               SubmissionTableKind
+	RowUUID            string
+	ParentRowUUID      *string
+	RootSubmissionUUID string
+	FlatProperties     map[string]interface{}
 }
 
 func detectSubmissionTableKind(formTable FormTable) SubmissionTableKind {
@@ -34,18 +35,26 @@ func analyzeSubmissionRow(formTable FormTable, row map[string]interface{}) (*Sub
 		return nil, err
 	}
 
+	kind := detectSubmissionTableKind(formTable)
+
 	var parentRowUUID *string
-	if detectSubmissionTableKind(formTable) == SubmissionTableRepeat {
+	rootSubmissionUUID := rowUUID
+
+	if kind == SubmissionTableRepeat {
 		parentRowUUID = extractSubmissionParentRowUUID(row)
+		if parentRowUUID != nil && *parentRowUUID != "" {
+			rootSubmissionUUID = *parentRowUUID
+		}
 	}
 
 	flatProperties := flattenSubmissionProperties(row)
 
 	return &SubmissionRowShape{
-		Kind:           detectSubmissionTableKind(formTable),
-		RowUUID:        rowUUID,
-		ParentRowUUID:  parentRowUUID,
-		FlatProperties: flatProperties,
+		Kind:               kind,
+		RowUUID:            rowUUID,
+		ParentRowUUID:      parentRowUUID,
+		RootSubmissionUUID: rootSubmissionUUID,
+		FlatProperties:     flatProperties,
 	}, nil
 }
 

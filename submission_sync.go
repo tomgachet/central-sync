@@ -8,14 +8,48 @@ import (
 	"time"
 )
 
-func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTableSchema, syncMode string, rows []map[string]interface{}) (*SyncStats, error) {
+func syncFormTableRows(
+	db DBExecutor,
+	runID int64,
+	projectID int,
+	formXMLID string,
+	formTable FormTable,
+	tableSchema FormTableSchema,
+	syncMode string,
+	rows []map[string]interface{},
+) (*SyncStats, error) {
 	stats := &SyncStats{
 		RowsFetched: len(rows),
 	}
 
 	for _, row := range rows {
-		action, rowSubmissionDate, rowUpdatedAt, err := upsertFormTableRow(db, formTable, tableSchema, syncMode, row)
+		action, submissionUUID, submissionDate, updatedAt, err := upsertFormTableRow(
+			db,
+			formTable,
+			tableSchema,
+			syncMode,
+			row,
+		)
 		if err != nil {
+			errorMessage := err.Error()
+
+			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+				RunID:                 runID,
+				ProjectID:             projectID,
+				FormXMLID:             &formXMLID,
+				ObjectType:            "form_submission",
+				ObjectName:            formTable.ODataName,
+				SQLTableName:          formTable.SQLName,
+				SubmissionUUID:        submissionUUID,
+				CentralSubmissionDate: submissionDate,
+				CentralUpdatedAt:      updatedAt,
+				SyncAction:            "failed",
+				SyncStatus:            "failed",
+				RowsFetched:           1,
+				RowsFailed:            1,
+				ErrorMessage:          &errorMessage,
+			})
+
 			return nil, err
 		}
 
@@ -29,8 +63,29 @@ func syncFormTableRows(db DBExecutor, formTable FormTable, tableSchema FormTable
 		}
 
 		if formTable.IsRoot {
-			stats.SyncOutSubmissionDate = maxTimePtr(stats.SyncOutSubmissionDate, rowSubmissionDate)
-			stats.SyncOutUpdatedAt = maxTimePtr(stats.SyncOutUpdatedAt, rowUpdatedAt)
+			stats.SyncOutSubmissionDate = maxTimePtr(stats.SyncOutSubmissionDate, submissionDate)
+			stats.SyncOutUpdatedAt = maxTimePtr(stats.SyncOutUpdatedAt, updatedAt)
+		}
+
+		err = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+			RunID:                 runID,
+			ProjectID:             projectID,
+			FormXMLID:             &formXMLID,
+			ObjectType:            "form_submission",
+			ObjectName:            formTable.ODataName,
+			SQLTableName:          formTable.SQLName,
+			SubmissionUUID:        submissionUUID,
+			CentralSubmissionDate: submissionDate,
+			CentralUpdatedAt:      updatedAt,
+			SyncAction:            action,
+			SyncStatus:            "success",
+			RowsFetched:           1,
+			RowsInserted:          boolToCount(action == "inserted"),
+			RowsUpdated:           boolToCount(action == "updated"),
+			RowsSkipped:           boolToCount(action == "skipped"),
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -53,28 +108,32 @@ func upsertFormTableRow(
 	tableSchema FormTableSchema,
 	syncMode string,
 	row map[string]interface{},
-) (string, *time.Time, *time.Time, error) {
+) (string, *string, *time.Time, *time.Time, error) {
 	shape, err := analyzeSubmissionRow(formTable, row)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, nil, err
 	}
+
+	submissionUUID := buildSubmissionUUIDPtr(shape)
 
 	if shape.Kind == SubmissionTableRoot {
 		if syncMode == SyncModeAppendOnly {
 			action, submissionDate, updatedAt, err := insertOnlyRootSubmissionRow(db, formTable, tableSchema, row, shape)
-			return action, submissionDate, updatedAt, err
+			return action, submissionUUID, submissionDate, updatedAt, err
 		}
 		action, submissionDate, updatedAt, err := upsertRootSubmissionRow(db, formTable, tableSchema, row, shape)
-		return action, submissionDate, updatedAt, err
+		return action, submissionUUID, submissionDate, updatedAt, err
 	}
 
 	if syncMode == SyncModeAppendOnly {
 		action, err := insertOnlyRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
-		return action, nil, nil, err
+		submissionDate, updatedAt := extractSubmissionTimesFromRepeatRow(row)
+		return action, submissionUUID, submissionDate, updatedAt, err
 	}
 
 	action, err := upsertRepeatSubmissionRow(db, formTable, tableSchema, row, shape)
-	return action, nil, nil, err
+	submissionDate, updatedAt := extractSubmissionTimesFromRepeatRow(row)
+	return action, submissionUUID, submissionDate, updatedAt, err
 }
 
 func insertOnlyRootSubmissionRow(
@@ -689,4 +748,22 @@ func maxTimePtr(current *time.Time, candidate *time.Time) *time.Time {
 		return &t
 	}
 	return current
+}
+
+func buildSubmissionUUIDPtr(shape *SubmissionRowShape) *string {
+	if shape == nil || shape.RootSubmissionUUID == "" {
+		return nil
+	}
+
+	value := shape.RootSubmissionUUID
+	return &value
+}
+
+func extractSubmissionTimesFromRepeatRow(row map[string]interface{}) (*time.Time, *time.Time) {
+	systemData, err := getSubmissionSystemData(row)
+	if err != nil {
+		return nil, nil
+	}
+
+	return systemData.SubmissionDate, systemData.UpdatedAt
 }
