@@ -34,20 +34,20 @@ func syncDatasetEntities(
 			errorMessage := err.Error()
 
 			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
-				RunID:             runID,
-				ProjectID:         projectID,
-				FormXMLID:         nil,
-				ObjectType:        "dataset",
-				ObjectName:        datasetName,
-				SQLTableName:      tableName,
-				EntityUUID:        &entityUUID,
-				CentralCreatedAt:  entityCreatedAt,
-				CentralUpdatedAt:  entityUpdatedAt,
-				SyncAction:        "failed",
-				SyncStatus:        "failed",
-				RowsFetched:       1,
-				RowsFailed:        1,
-				ErrorMessage:      &errorMessage,
+				RunID:            runID,
+				ProjectID:        projectID,
+				FormXMLID:        nil,
+				ObjectType:       "dataset",
+				ObjectName:       datasetName,
+				SQLTableName:     tableName,
+				EntityUUID:       &entityUUID,
+				CentralCreatedAt: entityCreatedAt,
+				CentralUpdatedAt: entityUpdatedAt,
+				SyncAction:       "failed",
+				SyncStatus:       "failed",
+				RowsFetched:      1,
+				RowsFailed:       1,
+				ErrorMessage:     &errorMessage,
 			})
 
 			return nil, err
@@ -65,21 +65,21 @@ func syncDatasetEntities(
 		stats.SyncOutUpdatedAt = maxTimePtr(stats.SyncOutUpdatedAt, entityUpdatedAt)
 
 		err = insertSyncRunDetail(db, SyncRunDetailInsertParams{
-			RunID:             runID,
-			ProjectID:         projectID,
-			FormXMLID:         nil,
-			ObjectType:        "dataset",
-			ObjectName:        datasetName,
-			SQLTableName:      tableName,
-			EntityUUID:        &entityUUID,
-			CentralCreatedAt:  entityCreatedAt,
-			CentralUpdatedAt:  entityUpdatedAt,
-			SyncAction:        action,
-			SyncStatus:        "success",
-			RowsFetched:       1,
-			RowsInserted:      boolToCount(action == "inserted"),
-			RowsUpdated:       boolToCount(action == "updated"),
-			RowsSkipped:       boolToCount(action == "skipped"),
+			RunID:            runID,
+			ProjectID:        projectID,
+			FormXMLID:        nil,
+			ObjectType:       "dataset",
+			ObjectName:       datasetName,
+			SQLTableName:     tableName,
+			EntityUUID:       &entityUUID,
+			CentralCreatedAt: entityCreatedAt,
+			CentralUpdatedAt: entityUpdatedAt,
+			SyncAction:       action,
+			SyncStatus:       "success",
+			RowsFetched:      1,
+			RowsInserted:     boolToCount(action == "inserted"),
+			RowsUpdated:      boolToCount(action == "updated"),
+			RowsSkipped:      boolToCount(action == "skipped"),
 		})
 		if err != nil {
 			return nil, err
@@ -118,12 +118,14 @@ func upsertDatasetEntity(
 		return "", entityUUID, nil, nil, err
 	}
 
-	existingVersion, exists, err := getStoredEntityVersion(db, tableName, entityUUID)
+	storedState, exists, err := getStoredEntityState(db, tableName, entityUUID)
 	if err != nil {
 		return "", entityUUID, nil, nil, err
 	}
 
-	if exists && existingVersion == systemData.Version {
+	if exists &&
+		storedState.Version == systemData.Version &&
+		sameNullableTimePtr(storedState.DeletedAt, systemData.DeletedAt) {
 		return "skipped", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
 	}
 
@@ -244,6 +246,11 @@ type EntitySystemData struct {
 	Version   int
 }
 
+type StoredEntityState struct {
+	Version   int
+	DeletedAt *time.Time
+}
+
 func getEntitySystemData(entity map[string]interface{}) (*EntitySystemData, error) {
 	rawSystem, ok := entity["__system"]
 	if !ok || rawSystem == nil {
@@ -283,27 +290,46 @@ func getEntitySystemData(entity map[string]interface{}) (*EntitySystemData, erro
 	}, nil
 }
 
-func getStoredEntityVersion(db DBExecutor, tableName string, entityUUID string) (int, bool, error) {
+func getStoredEntityState(db DBExecutor, tableName string, entityUUID string) (*StoredEntityState, bool, error) {
 	query := fmt.Sprintf(
-		`SELECT central_version FROM %s.%s WHERE entity_uuid = $1`,
+		`SELECT central_version, central_deleted_at
+		 FROM %s.%s
+		 WHERE entity_uuid = $1`,
 		quoteIdentifier(datasetSchema),
 		quoteIdentifier(tableName),
 	)
 
 	var version sql.NullInt32
-	err := db.QueryRow(query, entityUUID).Scan(&version)
+	var deletedAt sql.NullTime
+
+	err := db.QueryRow(query, entityUUID).Scan(&version, &deletedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, false, nil
+			return nil, false, nil
 		}
-		return 0, false, fmt.Errorf("failed to read stored entity version: %w", err)
+		return nil, false, fmt.Errorf("failed to read stored entity state: %w", err)
 	}
 
-	if !version.Valid {
-		return 0, true, nil
+	state := &StoredEntityState{}
+	if version.Valid {
+		state.Version = int(version.Int32)
+	}
+	if deletedAt.Valid {
+		t := deletedAt.Time
+		state.DeletedAt = &t
 	}
 
-	return int(version.Int32), true, nil
+	return state, true, nil
+}
+
+func sameNullableTimePtr(a *time.Time, b *time.Time) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Equal(*b)
 }
 
 func getEntityUUID(entity map[string]interface{}) (string, error) {

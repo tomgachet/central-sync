@@ -149,6 +149,22 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
 	}
 
+	deletedFilter := buildDeletedDatasetFilter()
+	fmt.Printf("  Applying deleted dataset filter: %s\n", deletedFilter)
+
+	deletedEntities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name, deletedFilter)
+	if err != nil {
+		errorMessage := err.Error()
+		_ = finishSyncRun(db, SyncRunFinishParams{
+			RunID:        syncRunID,
+			SyncStatus:   "failed",
+			ErrorMessage: &errorMessage,
+		})
+		return fmt.Errorf("deleted entities error for dataset %s: %w", dataset.Name, err)
+	}
+
+	entities = mergeDatasetEntitiesByID(entities, deletedEntities)
+
 	geojsonCollection, err := getDatasetEntitiesGeoJSON(client, project.ProjectID, dataset.Name)
 	if err != nil {
 		errorMessage := err.Error()
@@ -163,14 +179,14 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	geometryGeoJSONByEntityID := buildGeometryGeoJSONMap(geojsonCollection)
 
 	stats, err := syncDatasetEntities(
-	db,
-	syncRunID,
-	project.ProjectID,
-	dataset.TableName,
-	dataset.Name,
-	entities,
-	metadata.Properties,
-	geometryGeoJSONByEntityID,
+		db,
+		syncRunID,
+		project.ProjectID,
+		dataset.TableName,
+		dataset.Name,
+		entities,
+		metadata.Properties,
+		geometryGeoJSONByEntityID,
 	)
 	if err != nil {
 		errorMessage := err.Error()

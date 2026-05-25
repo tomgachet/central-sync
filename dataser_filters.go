@@ -36,3 +36,7 @@ func buildDatasetFilter(lastSync *LastSuccessfulDatasetSync) string {
 
 	return fmt.Sprintf("(%s) or (%s)", parts[0], parts[1])
 }
+
+func buildDeletedDatasetFilter() string {
+	return "__system/deletedAt ne null"
+}
