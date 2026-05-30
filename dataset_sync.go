@@ -23,7 +23,7 @@ func syncDatasetEntities(
 	}
 
 	for _, entity := range entities {
-		action, entityUUID, entityCreatedAt, entityUpdatedAt, err := upsertDatasetEntity(
+		action, entityUUID, entityCreatedAt, entityUpdatedAt, entityDeletedAt, err := upsertDatasetEntity(
 			db,
 			tableName,
 			entity,
@@ -43,6 +43,7 @@ func syncDatasetEntities(
 				EntityUUID:       &entityUUID,
 				CentralCreatedAt: entityCreatedAt,
 				CentralUpdatedAt: entityUpdatedAt,
+				CentralDeletedAt: entityDeletedAt,
 				SyncAction:       "failed",
 				SyncStatus:       "failed",
 				RowsFetched:      1,
@@ -74,6 +75,7 @@ func syncDatasetEntities(
 			EntityUUID:       &entityUUID,
 			CentralCreatedAt: entityCreatedAt,
 			CentralUpdatedAt: entityUpdatedAt,
+			CentralDeletedAt: entityDeletedAt,
 			SyncAction:       action,
 			SyncStatus:       "success",
 			RowsFetched:      1,
@@ -105,38 +107,38 @@ func upsertDatasetEntity(
 	entity map[string]interface{},
 	properties []DatasetProperty,
 	geometryGeoJSONByEntityID map[string]interface{},
-) (string, string, *time.Time, *time.Time, error) {
+) (string, string, *time.Time, *time.Time, *time.Time, error) {
 	entityUUID, err := getEntityUUID(entity)
 	if err != nil {
-		return "", "", nil, nil, err
+		return "", "", nil, nil, nil, err
 	}
 
 	label := getEntityLabel(entity)
 
 	systemData, err := getEntitySystemData(entity)
 	if err != nil {
-		return "", entityUUID, nil, nil, err
+		return "", entityUUID, nil, nil, nil, err
 	}
 
 	storedState, exists, err := getStoredEntityState(db, tableName, entityUUID)
 	if err != nil {
-		return "", entityUUID, nil, nil, err
+		return "", entityUUID, nil, nil, nil, err
 	}
 
 	if exists &&
 		storedState.Version == systemData.Version &&
 		sameNullableTimePtr(storedState.DeletedAt, systemData.DeletedAt) {
-		return "skipped", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
+		return "skipped", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, systemData.DeletedAt, nil
 	}
 
 	dataJSON, err := json.Marshal(entity)
 	if err != nil {
-		return "", entityUUID, nil, nil, fmt.Errorf("failed to marshal entity JSON: %w", err)
+		return "", entityUUID, nil, nil, nil, fmt.Errorf("failed to marshal entity JSON: %w", err)
 	}
 
 	geometryGeoJSONValue, err := buildGeometryGeoJSONValue(geometryGeoJSONByEntityID, entityUUID)
 	if err != nil {
-		return "", entityUUID, nil, nil, err
+		return "", entityUUID, nil, nil, nil, err
 	}
 
 	columns := []string{
@@ -223,7 +225,7 @@ func upsertDatasetEntity(
 
 	_, err = db.Exec(query, values...)
 	if err != nil {
-		return "", entityUUID, nil, nil, fmt.Errorf(
+		return "", entityUUID, nil, nil, nil, fmt.Errorf(
 			"failed to upsert entity %s into %s.%s: %w",
 			entityUUID,
 			datasetSchema,
@@ -233,10 +235,10 @@ func upsertDatasetEntity(
 	}
 
 	if exists {
-		return "updated", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
+		return "updated", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, systemData.DeletedAt, nil
 	}
 
-	return "inserted", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, nil
+	return "inserted", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, systemData.DeletedAt, nil
 }
 
 type EntitySystemData struct {

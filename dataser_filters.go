@@ -37,6 +37,13 @@ func buildDatasetFilter(lastSync *LastSuccessfulDatasetSync) string {
 	return fmt.Sprintf("(%s) or (%s)", parts[0], parts[1])
 }
 
-func buildDeletedDatasetFilter() string {
-	return "__system/deletedAt ne null"
+func buildDeletedDatasetFilter(lastSync *LastSuccessfulDatasetSync) string {
+	if lastSync == nil || lastSync.MaxDeletedAt == nil {
+		return "__system/deletedAt ne null"
+	}
+
+	return fmt.Sprintf(
+		"(__system/deletedAt ne null) and (__system/deletedAt gt %s)",
+		formatODataDateTime(*lastSync.MaxDeletedAt),
+	)
 }

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     central_submission_date TIMESTAMPTZ,
     central_created_at TIMESTAMPTZ,
     central_updated_at TIMESTAMPTZ,
+    central_deleted_at TIMESTAMPTZ,
     sync_action VARCHAR(20) NOT NULL,          -- inserted | updated | skipped | failed
     sync_status VARCHAR(20) NOT NULL,          -- success | failed
     rows_fetched INT NOT NULL DEFAULT 1,
@@ -66,42 +67,39 @@ SELECT
     project_id,
     object_name,
     MAX(central_created_at) AS max_created_at,
-    MAX(central_updated_at) AS max_updated_at
+    MAX(central_updated_at) AS max_updated_at,
+    MAX(central_deleted_at) AS max_deleted_at
 FROM central_metadata.sync_runs_detail
 WHERE object_type = 'dataset'
   AND sync_status = 'success'
 GROUP BY project_id, object_name;
 
-CREATE TABLE IF NOT EXISTS central_metadata.failed_submissions (
-    failed_submission_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INT NOT NULL,
-    form_xml_id VARCHAR(100) NOT NULL,
-    submission_uuid UUID NOT NULL,
-    submission_date TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ,
-    first_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    retry_count INT NOT NULL DEFAULT 0,
-    sync_status VARCHAR(20) NOT NULL DEFAULT 'pending',
-    failed_object_name VARCHAR(150) NOT NULL,
-    last_error_message TEXT NOT NULL,
-    root_table_name VARCHAR(150) NOT NULL,
-    last_run_id BIGINT,
-    resolved_at TIMESTAMPTZ
-);
+-- central_metadata.last_failed_submissions source
 
-CREATE TABLE IF NOT EXISTS central_metadata.failed_dataset_entities (
-    failed_entity_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INT NOT NULL,
-    dataset_name VARCHAR(150) NOT NULL,
-    sql_table_name VARCHAR(150) NOT NULL,
-    entity_uuid UUID NOT NULL,
-    entity_version BIGINT,
-    first_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    retry_count INT NOT NULL DEFAULT 0,
-    sync_status VARCHAR(20) NOT NULL DEFAULT 'pending',   -- pending | retrying | resolved | ignored
-    last_error_message TEXT NOT NULL,
-    last_run_id BIGINT,
-    resolved_at TIMESTAMPTZ
-);
+CREATE OR REPLACE VIEW central_metadata.last_failed_submissions
+AS SELECT run_detail_id,
+    run_id,
+    project_id,
+    form_xml_id,
+    submission_uuid,
+    central_submission_date,
+    central_updated_at,
+    sync_status,
+    sync_action,
+    error_message,
+    processed_at
+   FROM ( SELECT DISTINCT ON (sync_runs_detail.project_id, sync_runs_detail.form_xml_id, sync_runs_detail.submission_uuid) sync_runs_detail.run_detail_id,
+            sync_runs_detail.run_id,
+            sync_runs_detail.project_id,
+            sync_runs_detail.form_xml_id,
+            sync_runs_detail.submission_uuid,
+            sync_runs_detail.central_submission_date,
+            sync_runs_detail.central_updated_at,
+            sync_runs_detail.sync_status,
+            sync_runs_detail.sync_action,
+            sync_runs_detail.error_message,
+            sync_runs_detail.processed_at
+           FROM central_metadata.sync_runs_detail
+          WHERE sync_runs_detail.object_type::text = 'form_submission'::text AND sync_runs_detail.submission_uuid IS NOT NULL
+          ORDER BY sync_runs_detail.project_id, sync_runs_detail.form_xml_id, sync_runs_detail.submission_uuid, sync_runs_detail.processed_at DESC, sync_runs_detail.run_detail_id DESC) t
+  WHERE sync_status::text = 'failed'::text;

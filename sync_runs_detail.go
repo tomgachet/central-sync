@@ -18,6 +18,7 @@ type SyncRunDetailInsertParams struct {
 	CentralCreatedAt      *time.Time
 	CentralSubmissionDate *time.Time
 	CentralUpdatedAt      *time.Time
+	CentralDeletedAt      *time.Time
 	SyncAction            string
 	SyncStatus            string
 	RowsFetched           int
@@ -42,6 +43,7 @@ type LastSuccessfulDatasetSync struct {
 	ObjectName   string
 	MaxCreatedAt *time.Time
 	MaxUpdatedAt *time.Time
+	MaxDeletedAt *time.Time
 }
 
 type FailedSubmissionRef struct {
@@ -67,6 +69,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 			central_created_at,
 			central_submission_date,
 			central_updated_at,
+			central_deleted_at,
 			sync_action,
 			sync_status,
 			rows_fetched,
@@ -80,7 +83,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
 		)
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -97,6 +100,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 		params.CentralCreatedAt,
 		params.CentralSubmissionDate,
 		params.CentralUpdatedAt,
+		params.CentralDeletedAt,
 		params.SyncAction,
 		params.SyncStatus,
 		params.RowsFetched,
@@ -172,7 +176,8 @@ func getLastSuccessfulDatasetSync(
 			project_id,
 			object_name,
 			max_created_at,
-			max_updated_at
+			max_updated_at,
+			max_deleted_at
 		FROM %s.last_successful_datasets_sync
 		WHERE project_id = $1
 		  AND object_name = $2
@@ -182,12 +187,14 @@ func getLastSuccessfulDatasetSync(
 	var result LastSuccessfulDatasetSync
 	var maxCreatedAt sql.NullTime
 	var maxUpdatedAt sql.NullTime
+	var maxDeletedAt sql.NullTime
 
 	err := db.QueryRow(query, projectID, objectName).Scan(
 		&result.ProjectID,
 		&result.ObjectName,
 		&maxCreatedAt,
 		&maxUpdatedAt,
+		&maxDeletedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -201,6 +208,9 @@ func getLastSuccessfulDatasetSync(
 	}
 	if maxUpdatedAt.Valid {
 		result.MaxUpdatedAt = &maxUpdatedAt.Time
+	}
+	if maxDeletedAt.Valid {
+		result.MaxDeletedAt = &maxDeletedAt.Time
 	}
 
 	return &result, nil

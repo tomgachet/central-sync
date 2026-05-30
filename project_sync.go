@@ -149,7 +149,7 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
 	}
 
-	deletedFilter := buildDeletedDatasetFilter()
+	deletedFilter := buildDeletedDatasetFilter(lastDatasetSync)
 	fmt.Printf("  Applying deleted dataset filter: %s\n", deletedFilter)
 
 	deletedEntities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name, deletedFilter)
