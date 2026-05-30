@@ -178,7 +178,7 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 
 	geometryGeoJSONByEntityID := buildGeometryGeoJSONMap(geojsonCollection)
 
-	stats, err := syncDatasetEntities(
+	stats, syncErr := syncDatasetEntities(
 		db,
 		syncRunID,
 		project.ProjectID,
@@ -188,36 +188,38 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		metadata.Properties,
 		geometryGeoJSONByEntityID,
 	)
-	if err != nil {
-		errorMessage := err.Error()
-		_ = finishSyncRun(db, SyncRunFinishParams{
-			RunID:        syncRunID,
-			SyncStatus:   "failed",
-			RowsFetched:  len(entities),
-			ErrorMessage: &errorMessage,
-		})
-		return fmt.Errorf("entity sync error for dataset %s: %w", dataset.Name, err)
+
+	finalStatus := "success"
+	var finalErrorMessage *string
+
+	if syncErr != nil {
+		finalStatus = "partial_success"
+		msg := syncErr.Error()
+		finalErrorMessage = &msg
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
 		RunID:        syncRunID,
-		SyncStatus:   "success",
+		SyncStatus:   finalStatus,
 		RowsFetched:  stats.RowsFetched,
 		RowsInserted: stats.RowsInserted,
 		RowsUpdated:  stats.RowsUpdated,
 		RowsSkipped:  stats.RowsSkipped,
+		ErrorMessage: finalErrorMessage,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to finalize sync run for dataset %s: %w", dataset.Name, err)
 	}
 
 	fmt.Printf(
-		"Dataset %s synced successfully: fetched=%d inserted=%d updated=%d skipped=%d\n",
+		"Dataset %s synced successfully: fetched=%d inserted=%d updated=%d skipped=%d failed=%d status=%s\n",
 		dataset.Name,
 		stats.RowsFetched,
 		stats.RowsInserted,
 		stats.RowsUpdated,
 		stats.RowsSkipped,
+		stats.RowsFailed,
+		finalStatus,
 	)
 
 	return nil

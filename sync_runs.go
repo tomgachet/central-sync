@@ -31,6 +31,7 @@ type SyncStats struct {
 	RowsInserted          int
 	RowsUpdated           int
 	RowsSkipped           int
+	RowsFailed            int
 	SyncOutSubmissionDate *time.Time
 	SyncOutUpdatedAt      *time.Time
 }

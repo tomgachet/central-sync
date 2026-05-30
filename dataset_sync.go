@@ -22,6 +22,8 @@ func syncDatasetEntities(
 		RowsFetched: len(entities),
 	}
 
+	var firstErr error
+
 	for _, entity := range entities {
 		action, entityUUID, entityCreatedAt, entityUpdatedAt, entityDeletedAt, err := upsertDatasetEntity(
 			db,
@@ -51,7 +53,11 @@ func syncDatasetEntities(
 				ErrorMessage:     &errorMessage,
 			})
 
-			return nil, err
+			stats.RowsFailed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 
 		switch action {
@@ -84,21 +90,25 @@ func syncDatasetEntities(
 			RowsSkipped:      boolToCount(action == "skipped"),
 		})
 		if err != nil {
-			return nil, err
+			stats.RowsFailed++
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 
 	fmt.Printf(
-		"Sync summary for %s.%s: fetched=%d inserted=%d updated=%d skipped=%d\n",
+		"Sync summary for %s.%s: fetched=%d inserted=%d updated=%d skipped=%d failed=%d\n",
 		datasetSchema,
 		tableName,
 		stats.RowsFetched,
 		stats.RowsInserted,
 		stats.RowsUpdated,
 		stats.RowsSkipped,
+		stats.RowsFailed,
 	)
 
-	return stats, nil
+	return stats, firstErr
 }
 
 func upsertDatasetEntity(
@@ -225,7 +235,7 @@ func upsertDatasetEntity(
 
 	_, err = db.Exec(query, values...)
 	if err != nil {
-		return "", entityUUID, nil, nil, nil, fmt.Errorf(
+		return "", entityUUID, systemData.CreatedAt, systemData.UpdatedAt, systemData.DeletedAt, fmt.Errorf(
 			"failed to upsert entity %s into %s.%s: %w",
 			entityUUID,
 			datasetSchema,
