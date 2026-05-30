@@ -101,6 +101,7 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	}
 
 	syncMode := getFormSyncMode(form)
+	approvedOnly := isApprovedOnly(form)
 
 	lastSubmissionSync, err := getLastSuccessfulSubmissionSync(db, project.ProjectID, form.XMLFormID)
 	if err != nil {
@@ -185,9 +186,9 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 
 		filter := ""
 		if formTable.IsRoot {
-			filter = buildSubmissionRootFilter(lastSubmissionSync, syncMode)
+			filter = buildSubmissionRootFilter(lastSubmissionSync, syncMode, approvedOnly)
 		} else {
-			filter = buildSubmissionRepeatFilter(lastSubmissionSync, syncMode)
+			filter = buildSubmissionRepeatFilter(lastSubmissionSync, syncMode, approvedOnly)
 		}
 
 		if filter != "" {
@@ -235,33 +236,34 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	var firstErrorMessage *string
 
 	for _, batch := range batches {
-	batchStats, err := syncSubmissionBatch(
-		db,
-		syncRunID,
-		project.ProjectID,
-		form.XMLFormID,
-		syncMode,
-		batch,
-	)
+		batchStats, err := syncSubmissionBatch(
+			db,
+			syncRunID,
+			project.ProjectID,
+			form.XMLFormID,
+			syncMode,
+			batch,
+		)
 
-	if err != nil {
-		hadFailure = true
-		msg := err.Error()
-		if firstErrorMessage == nil {
-			firstErrorMessage = &msg
+		if err != nil {
+			hadFailure = true
+			msg := err.Error()
+			if firstErrorMessage == nil {
+				firstErrorMessage = &msg
+			}
+			fmt.Printf("  Submission batch sync error for %s: %v\n", batch.RootSubmissionUUID, err)
+			continue
 		}
-		fmt.Printf("  Submission batch sync error for %s: %v\n", batch.RootSubmissionUUID, err)
-		continue
-	}
 
-	if batchStats != nil {
-		totalStats.RowsFetched += batchStats.RowsFetched
-		totalStats.RowsInserted += batchStats.RowsInserted
-		totalStats.RowsUpdated += batchStats.RowsUpdated
-		totalStats.RowsSkipped += batchStats.RowsSkipped
-		totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
-		totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
-	}
+		if batchStats != nil {
+			totalStats.RowsFetched += batchStats.RowsFetched
+			totalStats.RowsInserted += batchStats.RowsInserted
+			totalStats.RowsUpdated += batchStats.RowsUpdated
+			totalStats.RowsSkipped += batchStats.RowsSkipped
+			totalStats.RowsFailed += batchStats.RowsFailed
+			totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
+			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
+		}
 	}
 
 	finalStatus := "success"
@@ -283,13 +285,14 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	}
 
 	fmt.Printf(
-		"Form %s synced: batches=%d fetched=%d inserted=%d updated=%d skipped=%d status=%s\n",
+		"Form %s synced: batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d status=%s\n",
 		form.XMLFormID,
 		len(batches),
 		totalStats.RowsFetched,
 		totalStats.RowsInserted,
 		totalStats.RowsUpdated,
 		totalStats.RowsSkipped,
+		totalStats.RowsFailed,
 		finalStatus,
 	)
 

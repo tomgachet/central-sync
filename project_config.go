@@ -23,6 +23,7 @@ type FormMapping struct {
 	TableName string `yaml:"table_name"`
 	Sync      bool   `yaml:"sync"`
 	SyncMode  string `yaml:"sync_mode"`
+	ApprovedOnly bool   `yaml:"approved_only"`
 }
 
 type ProjectMapping struct {
