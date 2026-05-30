@@ -102,6 +102,7 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 
 	syncMode := getFormSyncMode(form)
 	approvedOnly := isApprovedOnly(form)
+	approveAfterSync := shouldApproveAfterSync(form)
 
 	lastSubmissionSync, err := getLastSuccessfulSubmissionSync(db, project.ProjectID, form.XMLFormID)
 	if err != nil {
@@ -238,10 +239,12 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	for _, batch := range batches {
 		batchStats, err := syncSubmissionBatch(
 			db,
+			client,
 			syncRunID,
 			project.ProjectID,
 			form.XMLFormID,
 			syncMode,
+			approveAfterSync,
 			batch,
 		)
 

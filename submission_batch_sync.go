@@ -7,22 +7,24 @@ import (
 )
 
 type PendingSubmissionDetail struct {
-	FormTable          FormTable
-	SubmissionUUID     *string
-	SubmissionDate     *time.Time
-	UpdatedAt          *time.Time
-	SyncAction         string
-	RowsInserted       int
-	RowsUpdated        int
-	RowsSkipped        int
+	FormTable      FormTable
+	SubmissionUUID *string
+	SubmissionDate *time.Time
+	UpdatedAt      *time.Time
+	SyncAction     string
+	RowsInserted   int
+	RowsUpdated    int
+	RowsSkipped    int
 }
 
 func syncSubmissionBatch(
 	db *sql.DB,
+	client *CentralClient,
 	runID int64,
 	projectID int,
 	formXMLID string,
 	syncMode string,
+	approveAfterSync bool,
 	batch *SubmissionBatch,
 ) (*SyncStats, error) {
 	stats := &SyncStats{
@@ -105,6 +107,62 @@ func syncSubmissionBatch(
 
 	if err := tx.Commit(); err != nil {
 		return stats, fmt.Errorf("failed to commit submission %s: %w", batch.RootSubmissionUUID, err)
+	}
+
+	if approveAfterSync {
+		instanceID := "uuid:" + batch.RootSubmissionUUID
+
+		if err := approveSubmission(client, projectID, formXMLID, instanceID); err != nil {
+			errorMessage := err.Error()
+			failedSubmissionUUID := batch.RootSubmissionUUID
+
+			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+				RunID:          runID,
+				ProjectID:      projectID,
+				FormXMLID:      &formXMLID,
+				ObjectType:     "form_submission",
+				ObjectName:     batch.RootRow.FormTable.ODataName,
+				SQLTableName:   batch.RootRow.FormTable.SQLName,
+				SubmissionUUID: &failedSubmissionUUID,
+				SyncAction:     "approve_after_sync_failed",
+				SyncStatus:     "failed",
+				RowsFetched:    0,
+				RowsFailed:     1,
+				ErrorMessage:   &errorMessage,
+			})
+
+			return stats, fmt.Errorf(
+				"submission %s synced in database but approval failed: %w",
+				batch.RootSubmissionUUID,
+				err,
+			)
+		}
+
+		if err := addSubmissionSyncComment(client, projectID, formXMLID, instanceID); err != nil {
+			errorMessage := err.Error()
+			failedSubmissionUUID := batch.RootSubmissionUUID
+
+			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+				RunID:          runID,
+				ProjectID:      projectID,
+				FormXMLID:      &formXMLID,
+				ObjectType:     "form_submission",
+				ObjectName:     batch.RootRow.FormTable.ODataName,
+				SQLTableName:   batch.RootRow.FormTable.SQLName,
+				SubmissionUUID: &failedSubmissionUUID,
+				SyncAction:     "approve_comment_failed",
+				SyncStatus:     "failed",
+				RowsFetched:    0,
+				RowsFailed:     1,
+				ErrorMessage:   &errorMessage,
+			})
+
+			return stats, fmt.Errorf(
+				"submission %s approved but sync comment failed: %w",
+				batch.RootSubmissionUUID,
+				err,
+			)
+		}
 	}
 
 	for _, detail := range pendingDetails {
