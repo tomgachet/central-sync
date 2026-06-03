@@ -1,36 +1,48 @@
 package main
 
-import "fmt"
-
 func main() {
+	if err := initLogger(); err != nil {
+		println("failed to initialize logger:", err.Error())
+		return
+	}
+	defer func() {
+		if err := closeLogger(); err != nil {
+			println("failed to close logger:", err.Error())
+		}
+	}()
+
+	logInfo("central-sync started")
+
 	err := loadEnvFile(".env")
 	if err != nil {
-		fmt.Println("Environment error:", err)
+		logError("environment error: %v", err)
 		return
 	}
 
 	config, err := loadProjectConfig("central_config.yaml")
 	if err != nil {
-		fmt.Println("Configuration error:", err)
+		logError("configuration error: %v", err)
 		return
 	}
 
 	if len(config.Projects) == 0 {
-		fmt.Println("No project mapping found")
+		logWarn("no project mapping found")
 		return
 	}
 
 	client, err := newCentralClient()
 	if err != nil {
-		fmt.Println("Central client error:", err)
+		logError("central client error: %v", err)
 		return
 	}
 
-	fmt.Println("Starting dataset sync")
+	logInfo("starting dataset sync")
 	syncAllProjects(config.Projects, client)
-	fmt.Println("\nDataset sync finished")
+	logInfo("dataset sync finished")
 
-	fmt.Println("\nStarting form sync")
+	logInfo("starting form sync")
 	syncAllForms(config.Projects, client)
-	fmt.Println("\nForm sync finished")
+	logInfo("form sync finished")
+
+	logInfo("central-sync finished")
 }

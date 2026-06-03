@@ -9,7 +9,7 @@ func syncAllForms(projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
 		err := syncProjectForms(project, client)
 		if err != nil {
-			fmt.Println("Project form sync error:", err)
+			logError("[PROJECT] form sync error: %v", err)
 		}
 	}
 }
@@ -21,8 +21,8 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 	}
 
 	if !exists {
-		fmt.Printf(
-			"\nSkipping form sync for project %d (%s): project does not exist in ODK Central\n",
+		logWarn(
+			"[PROJECT] skipping form sync for project_id=%d project_name=%q: project does not exist in ODK Central",
 			project.ProjectID,
 			project.ProjectName,
 		)
@@ -32,16 +32,16 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 	formsToSync := getFormsToSync(project)
 
 	if len(formsToSync) == 0 {
-		fmt.Printf(
-			"\nSkipping form sync for project %d (%s): no form to sync\n",
+		logWarn(
+			"[PROJECT] skipping form sync for project_id=%d project_name=%q: no form to sync",
 			project.ProjectID,
 			project.ProjectName,
 		)
 		return nil
 	}
 
-	fmt.Printf(
-		"\nProcessing forms for project %d (%s) -> database %s\n",
+	logInfo(
+		"[PROJECT] processing forms for project_id=%d project_name=%q database=%s",
 		project.ProjectID,
 		project.ProjectName,
 		project.DatabaseName,
@@ -61,7 +61,13 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 	for _, form := range formsToSync {
 		err := syncSingleForm(db, project, form, client)
 		if err != nil {
-			fmt.Println("Form sync error:", err)
+			logError(
+				"[FORM] project_id=%d form=%q table=%s sync error: %v",
+				project.ProjectID,
+				form.XMLFormID,
+				form.TableName,
+				err,
+			)
 		}
 	}
 
@@ -69,8 +75,9 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 }
 
 func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client *CentralClient) error {
-	fmt.Printf(
-		"\nSyncing form %s -> root table %s (mode=%s)\n",
+	logInfo(
+		"[FORM] project_id=%d form=%q table=%s mode=%s starting sync",
+		project.ProjectID,
 		form.XMLFormID,
 		form.TableName,
 		getFormSyncMode(form),
@@ -138,6 +145,16 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 		return fmt.Errorf("failed to start sync run for form %s: %w", form.XMLFormID, err)
 	}
 
+	logInfo(
+		"[FORM] project_id=%d form=%q table=%s run_id=%d started approved_only=%t approve_after_sync=%t",
+		project.ProjectID,
+		form.XMLFormID,
+		form.TableName,
+		syncRunID,
+		approvedOnly,
+		approveAfterSync,
+	)
+
 	rowsByTable := make(map[string][]map[string]interface{})
 
 	for _, formTable := range formTables {
@@ -193,7 +210,14 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 		}
 
 		if filter != "" {
-			fmt.Printf("  Applying filter on %s: %s\n", formTable.ODataName, filter)
+			logInfo(
+				"[FORM] project_id=%d form=%q run_id=%d table=%q applying filter: %s",
+				project.ProjectID,
+				form.XMLFormID,
+				syncRunID,
+				formTable.ODataName,
+				filter,
+			)
 		}
 
 		rows, err := getAllFormTableRows(
@@ -213,9 +237,30 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 			return fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
 		}
 
+		filteredCount := len(rows)
+
 		failedRows := failedRowsByTable[formTable.ODataName]
 		if len(failedRows) > 0 {
 			rows = mergeSubmissionRows(rows, failedRows)
+			logInfo(
+				"[FORM] project_id=%d form=%q run_id=%d table=%q fetched_rows=%d replay_failed_rows=%d merged_rows=%d",
+				project.ProjectID,
+				form.XMLFormID,
+				syncRunID,
+				formTable.ODataName,
+				filteredCount,
+				len(failedRows),
+				len(rows),
+			)
+		} else {
+			logInfo(
+				"[FORM] project_id=%d form=%q run_id=%d table=%q fetched_rows=%d",
+				project.ProjectID,
+				form.XMLFormID,
+				syncRunID,
+				formTable.ODataName,
+				filteredCount,
+			)
 		}
 
 		rowsByTable[formTable.ODataName] = rows
@@ -231,6 +276,14 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 		})
 		return fmt.Errorf("failed to build submission batches for form %s: %w", form.XMLFormID, err)
 	}
+
+	logInfo(
+		"[FORM] project_id=%d form=%q run_id=%d batches_built=%d",
+		project.ProjectID,
+		form.XMLFormID,
+		syncRunID,
+		len(batches),
+	)
 
 	var totalStats SyncStats
 	hadFailure := false
@@ -254,7 +307,14 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 			if firstErrorMessage == nil {
 				firstErrorMessage = &msg
 			}
-			fmt.Printf("  Submission batch sync error for %s: %v\n", batch.RootSubmissionUUID, err)
+			logError(
+				"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s batch sync error: %v",
+				project.ProjectID,
+				form.XMLFormID,
+				syncRunID,
+				batch.RootSubmissionUUID,
+				err,
+			)
 			continue
 		}
 
@@ -287,16 +347,19 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 		return fmt.Errorf("failed to finalize sync run for form %s: %w", form.XMLFormID, err)
 	}
 
-	fmt.Printf(
-		"Form %s synced: batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d status=%s\n",
+	logInfo(
+		"[FORM] project_id=%d form=%q table=%s run_id=%d status=%s batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		project.ProjectID,
 		form.XMLFormID,
+		form.TableName,
+		syncRunID,
+		finalStatus,
 		len(batches),
 		totalStats.RowsFetched,
 		totalStats.RowsInserted,
 		totalStats.RowsUpdated,
 		totalStats.RowsSkipped,
 		totalStats.RowsFailed,
-		finalStatus,
 	)
 
 	return nil

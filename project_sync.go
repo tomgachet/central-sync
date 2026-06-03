@@ -6,7 +6,7 @@ func syncAllProjects(projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
 		err := syncProjectDatasets(project, client)
 		if err != nil {
-			fmt.Println("Project sync error:", err)
+			logError("[PROJECT] project sync error: %v", err)
 		}
 	}
 }
@@ -18,8 +18,8 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 	}
 
 	if !exists {
-		fmt.Printf(
-			"\nSkipping project %d (%s): project does not exist in ODK Central\n",
+		logWarn(
+			"[PROJECT] skipping project_id=%d project_name=%q: project does not exist in ODK Central",
 			project.ProjectID,
 			project.ProjectName,
 		)
@@ -29,16 +29,16 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 	datasetsToSync := getDatasetsToSync(project)
 
 	if len(datasetsToSync) == 0 {
-		fmt.Printf(
-			"\nSkipping project %d (%s): no dataset to sync\n",
+		logWarn(
+			"[PROJECT] skipping project_id=%d project_name=%q: no dataset to sync",
 			project.ProjectID,
 			project.ProjectName,
 		)
 		return nil
 	}
 
-	fmt.Printf(
-		"\nProcessing project %d (%s) -> database %s\n",
+	logInfo(
+		"[PROJECT] processing project_id=%d project_name=%q database=%s",
 		project.ProjectID,
 		project.ProjectName,
 		project.DatabaseName,
@@ -58,7 +58,13 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 	for _, dataset := range datasetsToSync {
 		err := syncSingleDataset(db, project, dataset, client)
 		if err != nil {
-			fmt.Println("Dataset sync error:", err)
+			logError(
+				"[DATASET] project_id=%d dataset=%q table=%s sync error: %v",
+				project.ProjectID,
+				dataset.Name,
+				dataset.TableName,
+				err,
+			)
 		}
 	}
 
@@ -66,8 +72,9 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 }
 
 func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) error {
-	fmt.Printf(
-		"\nSyncing dataset %s -> table %s\n",
+	logInfo(
+		"[DATASET] project_id=%d dataset=%q table=%s starting sync",
+		project.ProjectID,
 		dataset.Name,
 		dataset.TableName,
 	)
@@ -88,6 +95,14 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	if err != nil {
 		return fmt.Errorf("failed to start sync run for dataset %s: %w", dataset.Name, err)
 	}
+
+	logInfo(
+		"[DATASET] project_id=%d dataset=%q table=%s run_id=%d started",
+		project.ProjectID,
+		dataset.Name,
+		dataset.TableName,
+		syncRunID,
+	)
 
 	metadata, err := getDatasetMetadata(client, project.ProjectID, dataset.Name)
 	if err != nil {
@@ -135,7 +150,13 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 
 	filter := buildDatasetFilter(lastDatasetSync)
 	if filter != "" {
-		fmt.Printf("  Applying dataset filter: %s\n", filter)
+		logInfo(
+			"[DATASET] project_id=%d dataset=%q run_id=%d applying filter: %s",
+			project.ProjectID,
+			dataset.Name,
+			syncRunID,
+			filter,
+		)
 	}
 
 	entities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name, filter)
@@ -150,7 +171,13 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	}
 
 	deletedFilter := buildDeletedDatasetFilter(lastDatasetSync)
-	fmt.Printf("  Applying deleted dataset filter: %s\n", deletedFilter)
+	logInfo(
+		"[DATASET] project_id=%d dataset=%q run_id=%d applying deleted filter: %s",
+		project.ProjectID,
+		dataset.Name,
+		syncRunID,
+		deletedFilter,
+	)
 
 	deletedEntities, err := getAllDatasetEntities(client, project.ProjectID, dataset.Name, deletedFilter)
 	if err != nil {
@@ -164,6 +191,16 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	}
 
 	entities = mergeDatasetEntitiesByID(entities, deletedEntities)
+
+	logInfo(
+		"[DATASET] project_id=%d dataset=%q run_id=%d fetched_entities=%d deleted_entities=%d merged_entities=%d",
+		project.ProjectID,
+		dataset.Name,
+		syncRunID,
+		len(entities)-len(deletedEntities),
+		len(deletedEntities),
+		len(entities),
+	)
 
 	geojsonCollection, err := getDatasetEntitiesGeoJSON(client, project.ProjectID, dataset.Name)
 	if err != nil {
@@ -196,6 +233,13 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		finalStatus = "partial_success"
 		msg := syncErr.Error()
 		finalErrorMessage = &msg
+		logWarn(
+			"[DATASET] project_id=%d dataset=%q run_id=%d partial success: %v",
+			project.ProjectID,
+			dataset.Name,
+			syncRunID,
+			syncErr,
+		)
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
@@ -211,15 +255,18 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		return fmt.Errorf("failed to finalize sync run for dataset %s: %w", dataset.Name, err)
 	}
 
-	fmt.Printf(
-		"Dataset %s synced successfully: fetched=%d inserted=%d updated=%d skipped=%d failed=%d status=%s\n",
+	logInfo(
+		"[DATASET] project_id=%d dataset=%q table=%s run_id=%d status=%s fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		project.ProjectID,
 		dataset.Name,
+		dataset.TableName,
+		syncRunID,
+		finalStatus,
 		stats.RowsFetched,
 		stats.RowsInserted,
 		stats.RowsUpdated,
 		stats.RowsSkipped,
 		stats.RowsFailed,
-		finalStatus,
 	)
 
 	return nil
