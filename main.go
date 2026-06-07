@@ -1,6 +1,21 @@
 package main
 
+import (
+	"fmt"
+	"os"
+)
+
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-v":
+			fmt.Printf("central-sync %s\n", version)
+			return
+		}
+	}
+
 	if err := initLogger(); err != nil {
 		println("failed to initialize logger:", err.Error())
 		return
@@ -11,7 +26,7 @@ func main() {
 		}
 	}()
 
-	logInfo("central-sync started")
+	logInfo("central-sync started (version=%s)", version)
 
 	err := loadEnvFile(".env")
 	if err != nil {
@@ -44,5 +59,5 @@ func main() {
 	syncAllForms(config.Projects, client)
 	logInfo("form sync finished")
 
-	logInfo("central-sync finished")
+	logInfo("central-sync finished (version=%s)", version)
 }
