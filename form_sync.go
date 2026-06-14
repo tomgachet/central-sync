@@ -166,7 +166,7 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf(errorMessage)
+			return fmt.Errorf("%s", errorMessage)
 		}
 
 		err = ensureSubmissionTableExists(db, formTable)
