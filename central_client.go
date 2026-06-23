@@ -15,6 +15,12 @@ type CentralClient struct {
 	HTTPClient *http.Client
 }
 
+type centralHTTPResponse struct {
+	StatusCode int
+	Status     string
+	Body       []byte
+}
+
 func newCentralClient() (*CentralClient, error) {
 	baseURL, err := getRequiredEnv("ODK_CENTRAL_URL")
 	if err != nil {
@@ -81,32 +87,36 @@ func (c *CentralClient) doGetWithAccept(url string, token string, accept string)
 }
 
 func (c *CentralClient) DoJSON(method string, requestURL string, body interface{}, out interface{}) error {
-	resp, err := c.doJSON(method, requestURL, c.Token, body, out)
+	result, err := c.doJSON(method, requestURL, c.Token, body)
 	if err != nil {
 		return err
 	}
 
-	if resp.StatusCode != http.StatusUnauthorized {
-		return nil
+	if result.StatusCode == http.StatusUnauthorized {
+		if err := c.refreshToken(); err != nil {
+			return fmt.Errorf("failed to refresh Central token after 401: %w", err)
+		}
+
+		result, err = c.doJSON(method, requestURL, c.Token, body)
+		if err != nil {
+			return err
+		}
 	}
 
-	resp.Body.Close()
-
-	err = c.refreshToken()
-	if err != nil {
-		return fmt.Errorf("failed to refresh Central token after 401: %w", err)
+	if result.StatusCode < 200 || result.StatusCode >= 300 {
+		return fmt.Errorf("non-OK response from Central: %s - %s", result.Status, string(result.Body))
 	}
 
-	resp, err = c.doJSON(method, requestURL, c.Token, body, out)
-	if err != nil {
-		return err
+	if out != nil && len(result.Body) > 0 {
+		if err := json.Unmarshal(result.Body, out); err != nil {
+			return fmt.Errorf("failed to decode %s response body: %w", method, err)
+		}
 	}
-	defer resp.Body.Close()
 
 	return nil
 }
 
-func (c *CentralClient) doJSON(method string, requestURL string, token string, body interface{}, out interface{}) (*http.Response, error) {
+func (c *CentralClient) doJSON(method string, requestURL string, token string, body interface{}) (*centralHTTPResponse, error) {
 	var payloadBytes []byte
 	var err error
 
@@ -137,30 +147,18 @@ func (c *CentralClient) doJSON(method string, requestURL string, token string, b
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute %s request: %w", method, err)
 	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		return resp, nil
-	}
+	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		resp.Body.Close()
 		return nil, fmt.Errorf("failed to read %s response body: %w", method, err)
 	}
-	resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("non-OK response from Central: %s - %s", resp.Status, string(respBody))
-	}
-
-	if out != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, out); err != nil {
-			return nil, fmt.Errorf("failed to decode %s response body: %w", method, err)
-		}
-	}
-
-	resp.Body = io.NopCloser(bytes.NewReader(respBody))
-	return resp, nil
+	return &centralHTTPResponse{
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Body:       respBody,
+	}, nil
 }
 
 func (c *CentralClient) refreshToken() error {
