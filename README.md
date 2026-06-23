@@ -46,12 +46,13 @@ projects:
         table_name: "target_table_name_1"
         sync: true
       - name: "central_entity_list_name_2"
-        table_name: "target_table_name_1"
+        table_name: "target_table_name_2"
         sync: true
     forms:
       - xml_form_id: "central_form_id"
-        table_name: "target_table_name"
+        table_name: "target_form_table_name"
         sync: true
+        sync_mode: "append_only"
 
   - project_id: 2
     project_name: "project_name_for_information_only"
