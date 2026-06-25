@@ -310,6 +310,10 @@ Le dépôt inclut aussi un workflow GitHub Actions qui exécute la même command
 
 Avant d'ouvrir une pull request, gardez les fichiers locaux sans rapport hors du commit. Les notes locales comme les documents d'audit ou les notes de prochaines étapes ne doivent être ajoutées au commit que si elles sont destinées à devenir de la documentation du projet.
 
+## Licence
+
+`central-sync` est distribué sous licence Apache 2.0. Voir [LICENSE](LICENSE).
+
 ## Contribution
 
 Les contributions sont bienvenues. Les rapports de bugs, améliorations de documentation, tests et changements de code qui rendent la synchronisation plus sûre ou plus simple à opérer sont utiles.

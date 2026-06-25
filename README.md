@@ -312,6 +312,10 @@ The repository also includes a GitHub Actions workflow that runs the same comman
 
 Before opening a pull request, keep unrelated local files out of the commit. Local notes such as audit documents or next-step notes should only be committed if they are meant to become project documentation.
 
+## License
+
+`central-sync` is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
 ## Contributing
 
 Contributions are welcome. Bug reports, documentation improvements, tests, and code changes that make the sync safer or easier to operate are all useful.
