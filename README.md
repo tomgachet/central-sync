@@ -312,6 +312,10 @@ The repository also includes a GitHub Actions workflow that runs the same comman
 
 Before opening a pull request, keep unrelated local files out of the commit. Local notes such as audit documents or next-step notes should only be committed if they are meant to become project documentation.
 
+## Known Limitations
+
+PostgreSQL indexes are still minimal in this first public version. Additional indexes for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables are planned for upcoming versions.
+
 ## License
 
 `central-sync` is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

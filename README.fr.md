@@ -310,6 +310,10 @@ Le dépôt inclut aussi un workflow GitHub Actions qui exécute la même command
 
 Avant d'ouvrir une pull request, gardez les fichiers locaux sans rapport hors du commit. Les notes locales comme les documents d'audit ou les notes de prochaines étapes ne doivent être ajoutées au commit que si elles sont destinées à devenir de la documentation du projet.
 
+## Limites connues
+
+Les index PostgreSQL restent minimaux dans cette première version publique. Des index supplémentaires pour les recherches dans les métadonnées, les curseurs de synchronisation incrémentale, les reprises de soumissions en échec et les tables métier synchronisées sont prévus dans les prochaines versions.
+
 ## Licence
 
 `central-sync` est distribué sous licence Apache 2.0. Voir [LICENSE](LICENSE).
