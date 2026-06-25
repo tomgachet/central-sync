@@ -1,8 +1,10 @@
 # central-sync
 
-`central-sync` synchronizes data from an ODK Central instance to a PostgreSQL server.
+`central-sync` synchronizes data from an ODK Central instance to a PostgreSQL server through the ODK Central API and its OData endpoints.
 
 It is designed for scheduled or manual sync jobs where ODK Central remains the source of truth while PostgreSQL provides structured, queryable data for business workflows, downstream information systems, reporting, and application integrations.
+
+French documentation: [README.fr.md](README.fr.md)
 
 ## Features
 
@@ -199,7 +201,46 @@ The program runs in this order:
 5. Synchronize configured forms.
 6. Write logs to stdout and `central-sync.log`.
 
+## Central Endpoints Used
+
+`central-sync` uses `ODK_CENTRAL_URL` as the base URL. The configured Central user must have permissions for every project, dataset, form, and submission action listed below.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/v1/sessions` | Creates or refreshes the Central session token. |
+| `GET` | `/v1/projects/{projectId}` | Checks that a configured project exists. |
+| `GET` | `/v1/projects/{projectId}/forms` | Lists project forms and validates configured `xml_form_id` values. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Reads the form OData service document and discovers root and repeat tables. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Reads OData metadata XML for form table schemas. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/{odataTableUrl}` | Fetches submission rows from OData tables, including `Submissions` and repeat tables. Uses `$top=1000`, `$count=true`, optional `$filter`, and follows `@odata.nextLink`. |
+| `PATCH` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}` | Sets `reviewState` to `approved` when `approve_after_sync` is enabled. |
+| `POST` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/comments` | Adds a sync comment after approval. |
+| `GET` | `/v1/projects/{projectId}/datasets/{datasetName}` | Reads dataset metadata and properties. |
+| `GET` | `/v1/projects/{projectId}/datasets/{datasetName}.svc/Entities` | Fetches dataset entities through OData. Uses `$top=1000`, `$count=true`, optional `$filter`, and follows `@odata.nextLink`. |
+| `GET` | `/v1/projects/{projectId}/datasets/{datasetName}/entities.geojson` | Fetches dataset geometries as GeoJSON when geometry values are present. |
+
+For manual API testing, see the [`central-api-bruno`](https://github.com/tomgachet/central-api-bruno) repository, which provides a Bruno collection for exercising Central API endpoints.
+
 ## Sync Behavior
+
+### Filters
+
+`central-sync` builds OData `$filter` expressions from the last successful sync exposed by the SQL views in `central_metadata`, especially `last_successful_submissions_sync` and `last_successful_datasets_sync`. These filters limit each run to records that changed after the latest successful cursor for the same project and dataset or form.
+
+For datasets, active entities are fetched when either `__system/createdAt` or `__system/updatedAt` is greater than the previous successful sync cursor. Deleted entities are fetched separately with `__system/deletedAt ne null`; after the first successful deleted-entity sync, this is narrowed to `__system/deletedAt gt <last_deleted_at>`.
+
+For form submissions, the filter depends on `sync_mode`:
+
+| Mode | Filter behavior |
+| --- | --- |
+| `append_only` | Fetches submissions where `submissionDate` is greater than the previous successful submission cursor. |
+| `upsert` | Fetches submissions where `submissionDate` or `updatedAt` is greater than the previous successful cursor. |
+
+When `approved_only: true`, the form filter also requires `reviewState eq 'approved'`. For repeat tables, the same submission system fields are addressed through `$root/Submissions/__system/...`, so repeat rows follow the same root submission filter.
+
+Failed form submissions are also retried outside the normal incremental filter. `central-sync` reads `central_metadata.last_failed_submissions`, fetches those submission UUIDs again from Central, then merges them with the rows returned by the regular incremental OData filter so they are attempted again in the same run.
+
+On a first run, no previous successful cursor exists, so the incremental date filter is omitted and Central returns the matching rows for the configured dataset or form.
 
 ### Datasets
 
