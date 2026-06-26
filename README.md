@@ -328,7 +328,12 @@ Before opening a pull request, keep unrelated local files out of the commit. Loc
 
 ## Known Limitations
 
-PostgreSQL indexes are still minimal in this first public version. Additional indexes for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables are planned for upcoming versions.
+The following limitations are known and will be added or improved in future versions:
+
+- PostgreSQL indexes are still minimal in this first public version. Additional indexes are planned for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables.
+- Submission attachments, such as photos, audio files, or other media files, are not synchronized yet.
+- Concurrent runs are not blocked automatically yet. If a sync starts while a previous one is still running, both processes can run in parallel and write to the same tables. An execution lock will be added to prevent this case.
+- Log file management is still minimal. `central-sync` writes to stdout and appends messages to `central-sync.log`, but it does not handle log rotation, retention, maximum size, or a configurable log path yet.
 
 ## License
 
