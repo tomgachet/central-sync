@@ -29,7 +29,20 @@ Pour le développement, Go est requis. Le projet cible actuellement Go `1.26.x` 
 
 ## Installation
 
-Téléchargez un binaire depuis la page des releases, puis placez-le dans un répertoire contenant `.env` et `central_config.yaml`.
+Téléchargez l'archive `.tar.gz` correspondant à votre plateforme depuis la page des releases, puis extrayez le binaire `central-sync` dans un répertoire contenant `.env` et `central_config.yaml`.
+
+```sh
+tar -xzf central-sync-linux-amd64.tar.gz
+```
+
+Le nom du binaire reste `central-sync` d'une version à l'autre, ce qui permet de le mettre à jour sans modifier un cron ou un script d'exploitation.
+
+Si vous téléchargez directement le binaire brut Linux depuis GitHub, rendez-le exécutable puis renommez-le :
+
+```sh
+chmod +x central-sync-linux-amd64
+mv central-sync-linux-amd64 central-sync
+```
 
 Depuis les sources :
 
@@ -181,6 +194,7 @@ Utilisez un rôle PostgreSQL dédié plutôt qu'un superuser pour les synchronis
 Lancez le binaire depuis le répertoire contenant `.env` et `central_config.yaml` :
 
 ```sh
+cd /chemin/du/repertoire/central-sync
 ./central-sync
 ```
 

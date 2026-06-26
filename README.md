@@ -31,7 +31,20 @@ For development, Go is required. The project currently targets Go `1.26.x` in CI
 
 ## Installation
 
-Download a binary from the release page, then place it in a directory containing `.env` and `central_config.yaml`.
+Download the `.tar.gz` archive for your platform from the release page, then extract the `central-sync` binary into a directory containing `.env` and `central_config.yaml`.
+
+```sh
+tar -xzf central-sync-linux-amd64.tar.gz
+```
+
+The binary name stays `central-sync` across versions, so production cron jobs and scripts do not need to change when you upgrade.
+
+If you download the raw Linux binary directly from GitHub, make it executable and rename it:
+
+```sh
+chmod +x central-sync-linux-amd64
+mv central-sync-linux-amd64 central-sync
+```
 
 From source:
 
@@ -183,6 +196,7 @@ Use a dedicated PostgreSQL role rather than a superuser for regular sync runs.
 Run the binary from the directory containing `.env` and `central_config.yaml`:
 
 ```sh
+cd /path/to/central-sync-directory
 ./central-sync
 ```
 

@@ -31,21 +31,29 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist/linux-amd64 dist/linux-arm64 dist/windows-amd64
 
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/central-sync-${VERSION}-linux-amd64"
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/central-sync-${VERSION}-linux-arm64"
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/central-sync-${VERSION}-windows-amd64.exe"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/linux-amd64/central-sync"
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/linux-arm64/central-sync"
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/windows-amd64/central-sync.exe"
+
+          cp dist/linux-amd64/central-sync dist/central-sync-linux-amd64
+          cp dist/linux-arm64/central-sync dist/central-sync-linux-arm64
+          cp dist/windows-amd64/central-sync.exe dist/central-sync-windows-amd64.exe
+          tar -C dist/linux-amd64 -czf "dist/central-sync-linux-amd64.tar.gz" "central-sync"
+          tar -C dist/linux-arm64 -czf "dist/central-sync-linux-arm64.tar.gz" "central-sync"
 
           cd dist
-          sha256sum * > SHA256SUMS
+          sha256sum central-sync-* > SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/central-sync-${{ github.ref_name }}-linux-amd64
-            dist/central-sync-${{ github.ref_name }}-linux-arm64
-            dist/central-sync-${{ github.ref_name }}-windows-amd64.exe
+            dist/central-sync-linux-amd64
+            dist/central-sync-linux-arm64
+            dist/central-sync-linux-amd64.tar.gz
+            dist/central-sync-linux-arm64.tar.gz
+            dist/central-sync-windows-amd64.exe
             dist/SHA256SUMS
