@@ -10,7 +10,10 @@ import (
 func loadEnvFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", path, err)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s not found", path)
+		}
+		return fmt.Errorf("cannot open %s: %w", path, err)
 	}
 	defer file.Close()
 
