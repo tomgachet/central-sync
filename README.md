@@ -210,10 +210,19 @@ The program runs in this order:
 
 1. Load `.env`.
 2. Load and validate `central_config.yaml`.
-3. Authenticate to ODK Central.
-4. Synchronize configured datasets.
-5. Synchronize configured forms.
-6. Write logs to stdout and `central-sync.log`.
+3. Acquire a PostgreSQL advisory lock for each configured project database that has active dataset or form mappings.
+4. Authenticate to ODK Central.
+5. Synchronize configured datasets.
+6. Synchronize configured forms.
+7. Write logs to stdout and `central-sync.log`.
+
+### Concurrent Runs
+
+`central-sync` fails fast when another process is already synchronizing the same project database. The lock is a PostgreSQL advisory lock held on a dedicated database connection for the duration of the process, so it works across separate processes and is released automatically when the process exits or the connection is lost.
+
+The lock scope is one PostgreSQL project database. Two configured projects that use different PostgreSQL databases can still synchronize in parallel, but two runs targeting the same database cannot.
+
+If a second run starts while the lock is held, it logs a `sync lock error` and exits before reading or writing Central data. When available, the error includes the latest `central_metadata.sync_runs` row still marked as `running`, including its `run_id`, `project_id`, object type, object name, and start time. Finished, failed, and partial-success runs do not block future executions.
 
 ## Central Endpoints Used
 

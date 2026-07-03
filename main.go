@@ -45,6 +45,17 @@ func main() {
 		return
 	}
 
+	lockSet, err := acquireSyncRunLocks(config.Projects)
+	if err != nil {
+		logError("sync lock error: %v", err)
+		return
+	}
+	defer func() {
+		if err := lockSet.Release(); err != nil {
+			logError("sync lock release error: %v", err)
+		}
+	}()
+
 	client, err := newCentralClient()
 	if err != nil {
 		logError("central client error: %v", err)

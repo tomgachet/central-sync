@@ -208,10 +208,19 @@ Le programme s'exécute dans cet ordre :
 
 1. Charge `.env`.
 2. Charge et valide `central_config.yaml`.
-3. S'authentifie auprès d'ODK Central.
-4. Synchronise les datasets configurés.
-5. Synchronise les formulaires configurés.
-6. Écrit les logs dans stdout et `central-sync.log`.
+3. Acquiert un verrou PostgreSQL advisory pour chaque base projet configurée qui contient des mappings dataset ou formulaire actifs.
+4. S'authentifie auprès d'ODK Central.
+5. Synchronise les datasets configurés.
+6. Synchronise les formulaires configurés.
+7. Écrit les logs dans stdout et `central-sync.log`.
+
+### Exécutions concurrentes
+
+`central-sync` échoue immédiatement lorsqu'un autre processus synchronise déjà la même base projet. Le verrou est un verrou PostgreSQL advisory conservé sur une connexion dédiée pendant toute la durée du processus ; il fonctionne donc entre processus distincts et se libère automatiquement quand le processus se termine ou quand la connexion est perdue.
+
+La portée du verrou est une base PostgreSQL projet. Deux projets configurés sur des bases PostgreSQL différentes peuvent donc toujours se synchroniser en parallèle, mais deux exécutions visant la même base ne le peuvent pas.
+
+Si une seconde exécution démarre pendant que le verrou est détenu, elle journalise une erreur `sync lock error` et s'arrête avant de lire ou d'écrire des données Central. Quand l'information est disponible, l'erreur inclut la dernière ligne `central_metadata.sync_runs` encore marquée `running`, avec son `run_id`, son `project_id`, le type d'objet, le nom de l'objet et l'heure de démarrage. Les exécutions terminées, échouées ou en succès partiel ne bloquent pas les exécutions suivantes.
 
 ## Endpoints Central utilisés
 
