@@ -339,7 +339,6 @@ Les limites suivantes sont connues et seront intégrées ou améliorées dans de
 
 - Les index PostgreSQL restent minimaux dans cette première version publique. Des index supplémentaires sont prévus pour les recherches dans les métadonnées, les curseurs de synchronisation incrémentale, les reprises de soumissions en échec et les tables métier synchronisées.
 - Les pièces jointes aux soumissions, par exemple les photos, sons ou autres fichiers média, ne sont pas encore synchronisées.
-- Les exécutions concurrentes ne sont pas encore bloquées automatiquement. Si une synchronisation est lancée alors qu'une précédente est toujours en cours, les deux processus peuvent s'exécuter en parallèle et écrire dans les mêmes tables. Un verrou d'exécution sera ajouté pour éviter ce cas.
 - La gestion des fichiers de logs reste minimale. `central-sync` écrit dans stdout et ajoute les messages à `central-sync.log`, mais ne gère pas encore la rotation, la rétention, la taille maximale ou un chemin de log configurable.
 
 ## Licence
