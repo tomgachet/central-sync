@@ -3,18 +3,20 @@ package main
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
-func syncAllForms(projects []ProjectMapping, client *CentralClient) {
+func syncAllForms(syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
-		err := syncProjectForms(project, client)
+		err := syncProjectForms(syncID, project, client)
 		if err != nil {
-			logError("[PROJECT] form sync error: %v", err)
+			logError("[PROJECT] sync_id=%s form sync error: %v", syncID, err)
 		}
 	}
 }
 
-func syncProjectForms(project ProjectMapping, client *CentralClient) error {
+func syncProjectForms(syncID uuid.UUID, project ProjectMapping, client *CentralClient) error {
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
@@ -59,10 +61,11 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 	}
 
 	for _, form := range formsToSync {
-		err := syncSingleForm(db, project, form, client)
+		err := syncSingleForm(syncID, db, project, form, client)
 		if err != nil {
 			logError(
-				"[FORM] project_id=%d form=%q table=%s sync error: %v",
+				"[FORM] sync_id=%s project_id=%d form=%q table=%s sync error: %v",
+				syncID,
 				project.ProjectID,
 				form.XMLFormID,
 				form.TableName,
@@ -74,9 +77,10 @@ func syncProjectForms(project ProjectMapping, client *CentralClient) error {
 	return nil
 }
 
-func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client *CentralClient) error {
+func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form FormMapping, client *CentralClient) error {
 	logInfo(
-		"[FORM] project_id=%d form=%q table=%s mode=%s starting sync",
+		"[FORM] sync_id=%s project_id=%d form=%q table=%s mode=%s starting sync",
+		syncID,
 		project.ProjectID,
 		form.XMLFormID,
 		form.TableName,
@@ -134,6 +138,7 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	}
 
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
+		SyncID:       syncID,
 		ProjectID:    project.ProjectID,
 		FormXMLID:    &form.XMLFormID,
 		ObjectType:   "form",
@@ -146,7 +151,8 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	}
 
 	logInfo(
-		"[FORM] project_id=%d form=%q table=%s run_id=%d started approved_only=%t approve_after_sync=%t",
+		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d started approved_only=%t approve_after_sync=%t",
+		syncID,
 		project.ProjectID,
 		form.XMLFormID,
 		form.TableName,
@@ -308,7 +314,8 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 				firstErrorMessage = &msg
 			}
 			logError(
-				"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s batch sync error: %v",
+				"[FORM] sync_id=%s project_id=%d form=%q run_id=%d submission_uuid=%s batch sync error: %v",
+				syncID,
 				project.ProjectID,
 				form.XMLFormID,
 				syncRunID,
@@ -348,7 +355,8 @@ func syncSingleForm(db *sql.DB, project ProjectMapping, form FormMapping, client
 	}
 
 	logInfo(
-		"[FORM] project_id=%d form=%q table=%s run_id=%d status=%s batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d status=%s batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		syncID,
 		project.ProjectID,
 		form.XMLFormID,
 		form.TableName,

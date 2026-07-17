@@ -158,6 +158,18 @@ psql -d your_database -f sql_init/01_init_structure.sql
 psql -d your_database -f sql_init/02_init_role_and_privileges.sql
 ```
 
+After retrieving a new `central-sync` version, inspect `sql_migrations/` for files newer than the previously installed version. Run the required migrations in version order on every project database before starting the new binary for the first time.
+
+For an upgrade from 0.2.x to 0.3.0, run:
+
+```sh
+psql -d your_database -f sql_migrations/v0.3.0_add_sync_id.sql
+```
+
+Historical metadata rows keep a NULL `sync_id` because their original process launch cannot be reconstructed reliably.
+
+The migration also validates the foreign key from `sync_runs_detail.run_id` to `sync_runs.run_id`. It stops without committing if historical orphan detail rows exist; resolve those rows before retrying the migration.
+
 The structure script creates:
 
 - `central_datasets`
@@ -311,7 +323,26 @@ Treat these cases as recoverable partial failures and inspect `central_metadata.
 
 `central-sync` writes logs to stdout and to `central-sync.log`.
 
-Each dataset or form sync creates records in `central_metadata.sync_runs`. Row-level details are written to `central_metadata.sync_runs_detail` with counters for fetched, inserted, updated, skipped, deleted and failed rows.
+Each process launch generates one UUID named `sync_id`. The same value is stored on every run created during that launch, including work performed across different project databases. Startup, completion, dataset/form lifecycle and error log messages include it so the complete execution can be correlated without repeating it on every intermediate message.
+
+Each dataset or form sync also receives its own database-generated `run_id` and creates a record in `central_metadata.sync_runs`. A `run_id` identifies one dataset or form run, while a `sync_id` identifies the complete `central-sync` launch. Row-level details are written to `central_metadata.sync_runs_detail` and linked to their launch through `run_id`.
+
+For example, all metadata for one launch can be inspected with:
+
+```sql
+SELECT *
+FROM central_metadata.sync_runs
+WHERE sync_id = '00000000-0000-4000-8000-000000000000';
+```
+
+To include row-level details:
+
+```sql
+SELECT r.sync_id, d.*
+FROM central_metadata.sync_runs AS r
+JOIN central_metadata.sync_runs_detail AS d USING (run_id)
+WHERE r.sync_id = '00000000-0000-4000-8000-000000000000';
+```
 
 Useful metadata objects:
 
