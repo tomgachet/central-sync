@@ -4,6 +4,7 @@ CREATE SCHEMA IF NOT EXISTS central_metadata;
 
 CREATE TABLE IF NOT EXISTS central_metadata.sync_runs (
     run_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sync_id UUID NOT NULL,
     project_id INT NOT NULL,
     form_xml_id VARCHAR(100),
     object_type VARCHAR(20) NOT NULL,
@@ -24,7 +25,9 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs (
 
 CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     run_detail_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    run_id BIGINT NOT NULL,
+    run_id BIGINT NOT NULL
+        CONSTRAINT sync_runs_detail_run_id_fkey
+        REFERENCES central_metadata.sync_runs (run_id),
     project_id INT NOT NULL,
     form_xml_id VARCHAR(100),
     object_type VARCHAR(20) NOT NULL,
@@ -48,6 +51,11 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS sync_runs_sync_id_idx
+    ON central_metadata.sync_runs (sync_id);
+
+CREATE INDEX IF NOT EXISTS sync_runs_detail_run_id_idx
+    ON central_metadata.sync_runs_detail (run_id);
 
 CREATE OR REPLACE VIEW central_metadata.last_successful_submissions_sync AS
 SELECT
