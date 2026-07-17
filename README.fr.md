@@ -156,6 +156,18 @@ psql -d your_database -f sql_init/01_init_structure.sql
 psql -d your_database -f sql_init/02_init_role_and_privileges.sql
 ```
 
+Après avoir récupéré une nouvelle version de `central-sync`, consultez `sql_migrations/` pour repérer les fichiers postérieurs à la version précédemment installée. Exécutez les migrations requises dans l'ordre des versions sur chaque base projet avant le premier lancement du nouveau binaire.
+
+Pour une mise à jour de 0.2.x vers 0.3.0, exécutez :
+
+```sh
+psql -d your_database -f sql_migrations/v0.3.0_add_sync_id.sql
+```
+
+Les anciennes lignes de métadonnées conservent un `sync_id` NULL, car leur lancement d'origine ne peut pas être reconstitué de manière fiable.
+
+La migration valide également la clé étrangère de `sync_runs_detail.run_id` vers `sync_runs.run_id`. Elle s'arrête sans valider la transaction si des détails historiques orphelins existent ; corrigez ces lignes avant de relancer la migration.
+
 Le script de structure crée :
 
 - `central_datasets`
@@ -309,7 +321,26 @@ Traitez ces cas comme des échecs partiels récupérables et inspectez `central_
 
 `central-sync` écrit les logs dans stdout et dans `central-sync.log`.
 
-Chaque synchronisation de dataset ou de formulaire crée des enregistrements dans `central_metadata.sync_runs`. Les détails ligne par ligne sont écrits dans `central_metadata.sync_runs_detail` avec les compteurs de lignes récupérées, insérées, mises à jour, ignorées, supprimées et en échec.
+Chaque lancement du processus génère un UUID nommé `sync_id`. La même valeur est stockée sur toutes les exécutions créées pendant ce lancement, y compris lorsque plusieurs bases de projets sont traitées. Les logs de démarrage, de fin, de cycle de vie des datasets/formulaires et d'erreur l'incluent afin de corréler l'exécution complète sans le répéter dans chaque message intermédiaire.
+
+Chaque synchronisation de dataset ou de formulaire reçoit également son propre `run_id`, généré par la base, et crée un enregistrement dans `central_metadata.sync_runs`. Un `run_id` identifie la synchronisation d'un dataset ou d'un formulaire, tandis qu'un `sync_id` identifie le lancement complet de `central-sync`. Les détails ligne par ligne sont écrits dans `central_metadata.sync_runs_detail` et reliés à leur lancement par `run_id`.
+
+Par exemple, toutes les métadonnées d'un lancement peuvent être consultées avec :
+
+```sql
+SELECT *
+FROM central_metadata.sync_runs
+WHERE sync_id = '00000000-0000-4000-8000-000000000000';
+```
+
+Pour inclure les détails ligne par ligne :
+
+```sql
+SELECT r.sync_id, d.*
+FROM central_metadata.sync_runs AS r
+JOIN central_metadata.sync_runs_detail AS d USING (run_id)
+WHERE r.sync_id = '00000000-0000-4000-8000-000000000000';
+```
 
 Objets de métadonnées utiles :
 
