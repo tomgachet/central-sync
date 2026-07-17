@@ -1,17 +1,21 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
 
-func syncAllProjects(projects []ProjectMapping, client *CentralClient) {
+	"github.com/google/uuid"
+)
+
+func syncAllProjects(syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
-		err := syncProjectDatasets(project, client)
+		err := syncProjectDatasets(syncID, project, client)
 		if err != nil {
-			logError("[PROJECT] project sync error: %v", err)
+			logError("[PROJECT] sync_id=%s project sync error: %v", syncID, err)
 		}
 	}
 }
 
-func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
+func syncProjectDatasets(syncID uuid.UUID, project ProjectMapping, client *CentralClient) error {
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
@@ -56,10 +60,11 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 	}
 
 	for _, dataset := range datasetsToSync {
-		err := syncSingleDataset(db, project, dataset, client)
+		err := syncSingleDataset(syncID, db, project, dataset, client)
 		if err != nil {
 			logError(
-				"[DATASET] project_id=%d dataset=%q table=%s sync error: %v",
+				"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s sync error: %v",
+				syncID,
 				project.ProjectID,
 				dataset.Name,
 				dataset.TableName,
@@ -71,9 +76,10 @@ func syncProjectDatasets(project ProjectMapping, client *CentralClient) error {
 	return nil
 }
 
-func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) error {
+func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) error {
 	logInfo(
-		"[DATASET] project_id=%d dataset=%q table=%s starting sync",
+		"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s starting sync",
+		syncID,
 		project.ProjectID,
 		dataset.Name,
 		dataset.TableName,
@@ -85,6 +91,7 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	}
 
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
+		SyncID:       syncID,
 		ProjectID:    project.ProjectID,
 		FormXMLID:    nil,
 		ObjectType:   "dataset",
@@ -97,7 +104,8 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	}
 
 	logInfo(
-		"[DATASET] project_id=%d dataset=%q table=%s run_id=%d started",
+		"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s run_id=%d started",
+		syncID,
 		project.ProjectID,
 		dataset.Name,
 		dataset.TableName,
@@ -234,7 +242,8 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 		msg := syncErr.Error()
 		finalErrorMessage = &msg
 		logWarn(
-			"[DATASET] project_id=%d dataset=%q run_id=%d partial success: %v",
+			"[DATASET] sync_id=%s project_id=%d dataset=%q run_id=%d partial success: %v",
+			syncID,
 			project.ProjectID,
 			dataset.Name,
 			syncRunID,
@@ -256,7 +265,8 @@ func syncSingleDataset(db DBExecutor, project ProjectMapping, dataset DatasetMap
 	}
 
 	logInfo(
-		"[DATASET] project_id=%d dataset=%q table=%s run_id=%d status=%s fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s run_id=%d status=%s fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		syncID,
 		project.ProjectID,
 		dataset.Name,
 		dataset.TableName,

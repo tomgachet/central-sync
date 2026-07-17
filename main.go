@@ -26,49 +26,55 @@ func main() {
 		}
 	}()
 
-	logInfo("central-sync started (version=%s)", version)
-
-	err := loadEnvFile(".env")
+	syncID, err := newSyncID()
 	if err != nil {
-		logError("environment error: %v", err)
+		logError("startup error: %v", err)
+		return
+	}
+
+	logInfo("central-sync started sync_id=%s version=%s", syncID, version)
+
+	err = loadEnvFile(".env")
+	if err != nil {
+		logError("central-sync failed sync_id=%s environment error: %v", syncID, err)
 		return
 	}
 
 	config, err := loadProjectConfig("central_config.yaml")
 	if err != nil {
-		logError("configuration error: %v", err)
+		logError("central-sync failed sync_id=%s configuration error: %v", syncID, err)
 		return
 	}
 
 	if len(config.Projects) == 0 {
-		logWarn("no project mapping found")
+		logWarn("central-sync stopped sync_id=%s: no project mapping found", syncID)
 		return
 	}
 
 	lockSet, err := acquireSyncRunLocks(config.Projects)
 	if err != nil {
-		logError("sync lock error: %v", err)
+		logError("central-sync failed sync_id=%s sync lock error: %v", syncID, err)
 		return
 	}
 	defer func() {
 		if err := lockSet.Release(); err != nil {
-			logError("sync lock release error: %v", err)
+			logError("central-sync sync_id=%s sync lock release error: %v", syncID, err)
 		}
 	}()
 
 	client, err := newCentralClient()
 	if err != nil {
-		logError("central client error: %v", err)
+		logError("central-sync failed sync_id=%s central client error: %v", syncID, err)
 		return
 	}
 
 	logInfo("starting dataset sync")
-	syncAllProjects(config.Projects, client)
+	syncAllProjects(syncID, config.Projects, client)
 	logInfo("dataset sync finished")
 
 	logInfo("starting form sync")
-	syncAllForms(config.Projects, client)
+	syncAllForms(syncID, config.Projects, client)
 	logInfo("form sync finished")
 
-	logInfo("central-sync finished (version=%s)", version)
+	logInfo("central-sync finished sync_id=%s version=%s", syncID, version)
 }

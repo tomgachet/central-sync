@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const syncMetadataSchema = "central_metadata"
 
 type SyncRunStartParams struct {
+	SyncID       uuid.UUID
 	ProjectID    int
 	FormXMLID    *string
 	ObjectType   string
@@ -39,6 +42,7 @@ type SyncStats struct {
 func startSyncRun(db DBExecutor, params SyncRunStartParams) (int64, error) {
 	query := fmt.Sprintf(`
 		INSERT INTO %s.sync_runs (
+			sync_id,
 			project_id,
 			form_xml_id,
 			object_type,
@@ -48,13 +52,14 @@ func startSyncRun(db DBExecutor, params SyncRunStartParams) (int64, error) {
 			started_at,
 			sync_status
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING run_id
 	`, quoteIdentifier(syncMetadataSchema))
 
 	var runID int64
 	err := db.QueryRow(
 		query,
+		params.SyncID,
 		params.ProjectID,
 		params.FormXMLID,
 		params.ObjectType,
