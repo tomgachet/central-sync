@@ -88,6 +88,10 @@ Ne commitez pas `.env`. Il contient des identifiants, et des tokens Central peuv
 Créez `central_config.yaml` à côté du binaire :
 
 ```yaml
+attachment_storage:
+  backend: "local"
+  local_directory: "/var/lib/central-sync/attachments"
+
 projects:
   - project_id: 1
     project_name: "Example project"
@@ -106,6 +110,7 @@ projects:
         sync_mode: "upsert"
         approved_only: true
         approve_after_sync: false
+        sync_attachments: true
 
   - project_id: 2
     project_name: "Another project"
@@ -113,6 +118,13 @@ projects:
     datasets: []
     forms: []
 ```
+
+### Champs du stockage des pièces jointes
+
+| Champ | Requis | Description |
+| --- | --- | --- |
+| `backend` | Quand la synchronisation des pièces jointes est activée | Backend de stockage des pièces jointes. Seul `local` est actuellement pris en charge. |
+| `local_directory` | Quand la synchronisation utilise `backend: local` | Répertoire racine dans lequel les pièces jointes des soumissions seront stockées. Les chemins relatifs sont résolus depuis le répertoire de travail du processus. |
 
 ### Champs projet
 
@@ -142,6 +154,7 @@ projects:
 | `sync_mode` | Non | `append_only` par défaut. Peut valoir `append_only` ou `upsert`. |
 | `approved_only` | Non | Quand `true`, seules les soumissions approuvées sont récupérées. |
 | `approve_after_sync` | Non | Quand `true`, les soumissions synchronisées avec succès sont approuvées dans Central après le commit PostgreSQL. |
+| `sync_attachments` | Non | Quand `true`, les pièces jointes des soumissions sont synchronisées avec le stockage `attachment_storage` configuré. La valeur par défaut est `false`. |
 
 Les noms de tables doivent être uniques au sein d'un même projet, entre les mappings datasets et formulaires.
 

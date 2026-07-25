@@ -90,6 +90,10 @@ Do not commit `.env`. It contains credentials and Central tokens may also be cac
 Create `central_config.yaml` next to the binary:
 
 ```yaml
+attachment_storage:
+  backend: "local"
+  local_directory: "/var/lib/central-sync/attachments"
+
 projects:
   - project_id: 1
     project_name: "Example project"
@@ -108,6 +112,7 @@ projects:
         sync_mode: "upsert"
         approved_only: true
         approve_after_sync: false
+        sync_attachments: true
 
   - project_id: 2
     project_name: "Another project"
@@ -115,6 +120,13 @@ projects:
     datasets: []
     forms: []
 ```
+
+### Attachment Storage Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `backend` | When attachment sync is enabled | Attachment storage backend. Currently only `local` is supported. |
+| `local_directory` | When attachment sync uses `backend: local` | Root directory where submission attachments will be stored. Relative paths are resolved from the process working directory. |
 
 ### Project Fields
 
@@ -144,6 +156,7 @@ projects:
 | `sync_mode` | No | `append_only` by default. Can be `append_only` or `upsert`. |
 | `approved_only` | No | When `true`, only approved submissions are fetched. |
 | `approve_after_sync` | No | When `true`, successfully synchronized submissions are approved in Central after the PostgreSQL commit. |
+| `sync_attachments` | No | When `true`, submission attachments are synchronized using the configured `attachment_storage`. Defaults to `false`. |
 
 Table names must be unique inside the same project across dataset and form mappings.
 

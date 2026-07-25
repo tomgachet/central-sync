@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	SyncModeAppendOnly = "append_only"
-	SyncModeUpsert     = "upsert"
+	SyncModeAppendOnly  = "append_only"
+	SyncModeUpsert      = "upsert"
+	StorageBackendLocal = "local"
 )
 
 type DatasetMapping struct {
@@ -26,6 +27,12 @@ type FormMapping struct {
 	SyncMode         string `yaml:"sync_mode"`
 	ApprovedOnly     bool   `yaml:"approved_only"`
 	ApproveAfterSync bool   `yaml:"approve_after_sync"`
+	SyncAttachments  bool   `yaml:"sync_attachments"`
+}
+
+type AttachmentStorageConfig struct {
+	Backend        string `yaml:"backend"`
+	LocalDirectory string `yaml:"local_directory"`
 }
 
 type ProjectMapping struct {
@@ -37,7 +44,8 @@ type ProjectMapping struct {
 }
 
 type ProjectConfig struct {
-	Projects []ProjectMapping `yaml:"projects"`
+	AttachmentStorage AttachmentStorageConfig `yaml:"attachment_storage"`
+	Projects          []ProjectMapping        `yaml:"projects"`
 }
 
 func loadProjectConfig(path string) (*ProjectConfig, error) {
@@ -62,6 +70,8 @@ func validateProjectConfig(config *ProjectConfig) error {
 	if config == nil {
 		return fmt.Errorf("config is nil")
 	}
+
+	attachmentsEnabled := false
 
 	for projectIndex, project := range config.Projects {
 		projectRef := fmt.Sprintf("projects[%d]", projectIndex)
@@ -97,7 +107,32 @@ func validateProjectConfig(config *ProjectConfig) error {
 			if err := validateFormSyncMode(strings.TrimSpace(form.SyncMode), formRef); err != nil {
 				return err
 			}
+			attachmentsEnabled = attachmentsEnabled || form.SyncAttachments
 		}
+	}
+
+	if err := validateAttachmentStorageConfig(config.AttachmentStorage, attachmentsEnabled); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAttachmentStorageConfig(storage AttachmentStorageConfig, attachmentsEnabled bool) error {
+	backend := strings.TrimSpace(storage.Backend)
+	localDirectory := strings.TrimSpace(storage.LocalDirectory)
+
+	if backend != "" && backend != StorageBackendLocal {
+		return fmt.Errorf("attachment_storage.backend must be empty or %q", StorageBackendLocal)
+	}
+	if !attachmentsEnabled {
+		return nil
+	}
+	if backend == "" {
+		return fmt.Errorf("attachment_storage.backend is required when sync_attachments is enabled")
+	}
+	if localDirectory == "" {
+		return fmt.Errorf("attachment_storage.local_directory is required when sync_attachments is enabled")
 	}
 
 	return nil
