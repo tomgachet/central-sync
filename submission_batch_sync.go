@@ -120,6 +120,7 @@ func syncSubmissionBatch(
 			projectID,
 			formXMLID,
 			batch.RootSubmissionUUID,
+			batch,
 		)
 		if result != nil {
 			stats.AttachmentsExpected = result.Expected

@@ -40,6 +40,7 @@ func syncAndPersistSubmissionAttachments(
 	projectID int,
 	formXMLID string,
 	submissionUUID string,
+	batch *SubmissionBatch,
 ) (*AttachmentSyncResult, error) {
 	result, err := syncSubmissionAttachments(client, storage, projectID, formXMLID, submissionUUID)
 	if err != nil {
@@ -47,7 +48,11 @@ func syncAndPersistSubmissionAttachments(
 	}
 
 	for _, attachment := range result.Stored {
-		err := upsertSubmissionAttachmentMetadata(db, SubmissionAttachmentMetadata{
+		source, err := findSubmissionAttachmentSource(batch, attachment.Name)
+		if err != nil {
+			return result, err
+		}
+		metadata := SubmissionAttachmentMetadata{
 			RunID:          runID,
 			ProjectID:      projectID,
 			FormXMLID:      formXMLID,
@@ -59,7 +64,15 @@ func syncAndPersistSubmissionAttachments(
 			SizeBytes:      attachment.SizeBytes,
 			ChecksumSHA256: attachment.ChecksumSHA256,
 			ETag:           attachment.ETag,
-		})
+		}
+		if source != nil {
+			metadata.ODataTableName = source.ODataTableName
+			metadata.SQLTableName = source.SQLTableName
+			metadata.SourceRowUUID = source.SourceRowUUID
+			metadata.FieldName = source.FieldName
+		}
+
+		err = upsertSubmissionAttachmentMetadata(db, metadata)
 		if err != nil {
 			return result, err
 		}

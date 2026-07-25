@@ -180,6 +180,8 @@ Attachment downloads use a dedicated 10-minute HTTP timeout. Other Central API r
 
 Stored file metadata is upserted in `central_metadata.submission_attachments`. A download, storage, or metadata error marks the submission as failed, prevents automatic approval, and makes it eligible for the existing failed-submission retry flow.
 
+The same metadata row records the matching OData table, PostgreSQL table, source row, and flattened form field. This preserves the unique origin of an attachment referenced by either the root submission or a repeat row.
+
 Each form row in `central_metadata.sync_runs` records `attachments_expected`, `attachments_present`, `attachments_stored`, and `attachments_failed` totals for operational monitoring.
 
 ## PostgreSQL Setup
@@ -413,7 +415,6 @@ Before opening a pull request, keep unrelated local files out of the commit. Loc
 The following limitations are known and will be added or improved in future versions:
 
 - PostgreSQL indexes are still minimal in this first public version. Additional indexes are planned for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables.
-- Submission attachments, such as photos, audio files, or other media files, are not synchronized yet.
 - Log file management is still minimal. `central-sync` writes to stdout and appends messages to `central-sync.log`, but it does not handle log rotation, retention, maximum size, or a configurable log path yet.
 
 ## License

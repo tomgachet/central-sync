@@ -18,6 +18,10 @@ func TestUpsertSubmissionAttachmentMetadata(t *testing.T) {
 		FormXMLID:      "site_visit",
 		SubmissionUUID: "123e4567-e89b-12d3-a456-426614174000",
 		Filename:       "photo.jpg",
+		ODataTableName: "Submissions.repeat",
+		SQLTableName:   "site_visit__repeat",
+		SourceRowUUID:  "repeat-row",
+		FieldName:      "photo",
 		StorageBackend: StorageBackendLocal,
 		StoragePath:    "project-7/form-site_visit/submission-123/photo.jpg",
 		ContentType:    "image/jpeg",
@@ -37,10 +41,10 @@ func TestUpsertSubmissionAttachmentMetadata(t *testing.T) {
 	if !strings.Contains(executor.query, "ON CONFLICT (project_id, form_xml_id, submission_uuid, filename)") {
 		t.Fatalf("query does not contain attachment conflict key: %s", executor.query)
 	}
-	if len(executor.args) != 12 {
-		t.Fatalf("expected 12 arguments, got %d", len(executor.args))
+	if len(executor.args) != 16 {
+		t.Fatalf("expected 16 arguments, got %d", len(executor.args))
 	}
-	if executor.args[0] != 7 || executor.args[3] != "photo.jpg" || executor.args[10] != int64(42) || executor.args[11] != syncedAt {
+	if executor.args[0] != 7 || executor.args[3] != "photo.jpg" || executor.args[4] != "Submissions.repeat" || executor.args[6] != "repeat-row" || executor.args[14] != int64(42) || executor.args[15] != syncedAt {
 		t.Fatalf("unexpected arguments: %#v", executor.args)
 	}
 }
@@ -62,9 +66,9 @@ func TestUpsertSubmissionAttachmentMetadataUsesCurrentTimeByDefault(t *testing.T
 		t.Fatalf("upsertSubmissionAttachmentMetadata returned error: %v", err)
 	}
 
-	syncedAt, ok := executor.args[11].(time.Time)
+	syncedAt, ok := executor.args[15].(time.Time)
 	if !ok || syncedAt.Before(before) || syncedAt.After(time.Now().UTC()) {
-		t.Fatalf("unexpected default sync time: %#v", executor.args[11])
+		t.Fatalf("unexpected default sync time: %#v", executor.args[15])
 	}
 }
 

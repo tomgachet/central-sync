@@ -59,6 +59,13 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 	executor := &attachmentMetadataExecutor{}
 	storage := &recordingAttachmentStorage{}
 	client := &CentralClient{BaseURL: server.URL, Token: "token", HTTPClient: server.Client()}
+	batch := &SubmissionBatch{Rows: []*SubmissionRowRef{{
+		FormTable: FormTable{ODataName: "Submissions.repeat", SQLName: "site_visit__repeat"},
+		Shape: &SubmissionRowShape{
+			RowUUID:        "repeat-row",
+			FlatProperties: map[string]interface{}{"photo": "photo.jpg"},
+		},
+	}}}
 	result, err := syncAndPersistSubmissionAttachments(
 		executor,
 		client,
@@ -67,6 +74,7 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 		7,
 		"site_visit",
 		"uuid:123e4567-e89b-12d3-a456-426614174000",
+		batch,
 	)
 	if err != nil {
 		t.Fatalf("syncAndPersistSubmissionAttachments returned error: %v", err)
@@ -79,7 +87,10 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 	if args[0] != 7 || args[2] != "123e4567-e89b-12d3-a456-426614174000" || args[3] != "photo.jpg" {
 		t.Fatalf("unexpected metadata identity arguments: %#v", args)
 	}
-	if args[4] != StorageBackendLocal || args[6] != "image/jpeg" || args[9] != `"photo-v1"` || args[10] != int64(42) {
+	if args[4] != "Submissions.repeat" || args[6] != "repeat-row" || args[7] != "photo" {
+		t.Fatalf("unexpected attachment source arguments: %#v", args)
+	}
+	if args[8] != StorageBackendLocal || args[10] != "image/jpeg" || args[13] != `"photo-v1"` || args[14] != int64(42) {
 		t.Fatalf("unexpected storage metadata arguments: %#v", args)
 	}
 	missingArgs := executor.calls[1]

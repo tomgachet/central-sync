@@ -16,6 +16,10 @@ type SubmissionAttachmentMetadata struct {
 	FormXMLID      string
 	SubmissionUUID string
 	Filename       string
+	ODataTableName string
+	SQLTableName   string
+	SourceRowUUID  string
+	FieldName      string
 	StorageBackend string
 	StoragePath    string
 	ContentType    string
@@ -32,6 +36,10 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 			form_xml_id,
 			submission_uuid,
 			filename,
+			odata_table_name,
+			sql_table_name,
+			source_row_uuid,
+			field_name,
 			storage_backend,
 			storage_path,
 			content_type,
@@ -43,9 +51,13 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 			last_run_id,
 			synced_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, NULL, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, TRUE, NULL, $15, $16)
 		ON CONFLICT (project_id, form_xml_id, submission_uuid, filename)
 		DO UPDATE SET
+			odata_table_name = EXCLUDED.odata_table_name,
+			sql_table_name = EXCLUDED.sql_table_name,
+			source_row_uuid = EXCLUDED.source_row_uuid,
+			field_name = EXCLUDED.field_name,
 			storage_backend = EXCLUDED.storage_backend,
 			storage_path = EXCLUDED.storage_path,
 			content_type = EXCLUDED.content_type,
@@ -69,6 +81,10 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 		metadata.FormXMLID,
 		metadata.SubmissionUUID,
 		metadata.Filename,
+		nullableAttachmentSourceValue(metadata.ODataTableName),
+		nullableAttachmentSourceValue(metadata.SQLTableName),
+		nullableAttachmentSourceValue(metadata.SourceRowUUID),
+		nullableAttachmentSourceValue(metadata.FieldName),
 		metadata.StorageBackend,
 		metadata.StoragePath,
 		metadata.ContentType,
@@ -83,6 +99,13 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 	}
 
 	return nil
+}
+
+func nullableAttachmentSourceValue(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func markSubmissionAttachmentMissing(
