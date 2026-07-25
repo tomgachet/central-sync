@@ -170,6 +170,8 @@ project-{project_id}/form-{xml_form_id}/submission-{submission_uuid}/{filename}
 
 Les composants des chemins sont échappés avant utilisation. Les répertoires utilisent le mode `0750` et les fichiers le mode `0640` ; l'utilisateur système qui exécute `central-sync` doit pouvoir créer et écrire sous `local_directory`. Incluez ce répertoire dans les sauvegardes avec la base du projet.
 
+`central-sync` calcule un checksum SHA-256 pendant le téléchargement. Un fichier existant dont le contenu est identique reste inchangé. Un contenu différent remplace le fichier de manière atomique et apparaît avec l'action `replaced` dans les logs. Le checksum est conservé dans les métadonnées de la pièce jointe.
+
 Les métadonnées des fichiers stockés sont mises à jour par UPSERT dans `central_metadata.submission_attachments`. Une erreur de téléchargement, de stockage ou de métadonnées marque la soumission en échec, empêche son approbation automatique et la rend éligible au mécanisme existant de reprise des soumissions en échec.
 
 Chaque ligne de formulaire dans `central_metadata.sync_runs` enregistre les totaux `attachments_expected`, `attachments_present`, `attachments_stored` et `attachments_failed` pour le suivi opérationnel.

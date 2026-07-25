@@ -6,11 +6,14 @@ import (
 )
 
 type SyncedAttachment struct {
-	Name         string
-	RelativePath string
-	ContentType  string
-	ETag         string
-	SizeBytes    int64
+	Name           string
+	RelativePath   string
+	ContentType    string
+	ETag           string
+	SizeBytes      int64
+	ChecksumSHA256 string
+	Replaced       bool
+	Unchanged      bool
 }
 
 type AttachmentSyncResult struct {
@@ -91,11 +94,14 @@ func syncSingleSubmissionAttachment(
 	}
 
 	return &SyncedAttachment{
-		Name:         filename,
-		RelativePath: stored.RelativePath,
-		ContentType:  response.Header.Get("Content-Type"),
-		ETag:         response.Header.Get("ETag"),
-		SizeBytes:    stored.SizeBytes,
+		Name:           filename,
+		RelativePath:   stored.RelativePath,
+		ContentType:    response.Header.Get("Content-Type"),
+		ETag:           response.Header.Get("ETag"),
+		SizeBytes:      stored.SizeBytes,
+		ChecksumSHA256: stored.ChecksumSHA256,
+		Replaced:       stored.Replaced,
+		Unchanged:      stored.Unchanged,
 	}, nil
 }
 

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS central_metadata.submission_attachments (
     size_bytes BIGINT NOT NULL
         CONSTRAINT submission_attachments_size_bytes_check
         CHECK (size_bytes >= 0),
+    checksum_sha256 CHAR(64) NOT NULL,
     etag TEXT,
     last_run_id BIGINT NOT NULL
         CONSTRAINT submission_attachments_last_run_id_fkey

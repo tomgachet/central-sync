@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/url"
@@ -17,8 +19,11 @@ type AttachmentStorageKey struct {
 }
 
 type StoredAttachment struct {
-	RelativePath string
-	SizeBytes    int64
+	RelativePath   string
+	SizeBytes      int64
+	ChecksumSHA256 string
+	Replaced       bool
+	Unchanged      bool
 }
 
 type AttachmentStorage interface {
@@ -96,7 +101,8 @@ func (s *LocalAttachmentStorage) Store(key AttachmentStorageKey, source io.Reade
 		return nil, fmt.Errorf("failed to set attachment file permissions: %w", err)
 	}
 
-	sizeBytes, err := io.Copy(temporaryFile, source)
+	incomingHash := sha256.New()
+	sizeBytes, err := io.Copy(io.MultiWriter(temporaryFile, incomingHash), source)
 	if err != nil {
 		_ = temporaryFile.Close()
 		return nil, fmt.Errorf("failed to write attachment file: %w", err)
@@ -108,19 +114,59 @@ func (s *LocalAttachmentStorage) Store(key AttachmentStorageKey, source io.Reade
 	if err := temporaryFile.Close(); err != nil {
 		return nil, fmt.Errorf("failed to close attachment file: %w", err)
 	}
+
+	checksumSHA256 := hex.EncodeToString(incomingHash.Sum(nil))
+	existingChecksum, exists, err := attachmentFileChecksum(targetPath)
+	if err != nil {
+		return nil, err
+	}
+	if exists && existingChecksum == checksumSHA256 {
+		return &StoredAttachment{
+			RelativePath:   filepath.ToSlash(relativePath),
+			SizeBytes:      sizeBytes,
+			ChecksumSHA256: checksumSHA256,
+			Unchanged:      true,
+		}, nil
+	}
+
 	if err := os.Rename(temporaryPath, targetPath); err != nil {
 		return nil, fmt.Errorf("failed to publish attachment file: %w", err)
 	}
 	keepTemporaryFile = true
 
 	return &StoredAttachment{
-		RelativePath: filepath.ToSlash(relativePath),
-		SizeBytes:    sizeBytes,
+		RelativePath:   filepath.ToSlash(relativePath),
+		SizeBytes:      sizeBytes,
+		ChecksumSHA256: checksumSHA256,
+		Replaced:       exists,
 	}, nil
+}
+
+func attachmentFileChecksum(path string) (string, bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("failed to open existing attachment file: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", false, fmt.Errorf("failed to checksum existing attachment file: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), true, nil
 }
 
 func encodeStoragePathComponent(value string) string {
 	escaped := url.PathEscape(value)
+	if escaped == "." {
+		return "%2E"
+	}
+	if escaped == ".." {
+		return "%2E%2E"
+	}
 	return strings.ReplaceAll(escaped, `\`, "%5C")
 }
 

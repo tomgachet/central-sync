@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -32,6 +34,13 @@ func TestLocalAttachmentStorageStoresFileAtDeterministicPath(t *testing.T) {
 	}
 	if stored.SizeBytes != int64(len("image bytes")) {
 		t.Fatalf("unexpected stored size %d", stored.SizeBytes)
+	}
+	expectedHash := sha256.Sum256([]byte("image bytes"))
+	if stored.ChecksumSHA256 != hex.EncodeToString(expectedHash[:]) {
+		t.Fatalf("unexpected checksum %q", stored.ChecksumSHA256)
+	}
+	if stored.Replaced || stored.Unchanged {
+		t.Fatalf("expected a newly stored file, got %#v", stored)
 	}
 
 	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(stored.RelativePath)))
@@ -69,6 +78,27 @@ func TestLocalAttachmentStorageKeepsTraversalLikeNamesInsideRoot(t *testing.T) {
 	}
 }
 
+func TestLocalAttachmentStorageEncodesDotFilenames(t *testing.T) {
+	root := t.TempDir()
+	storage, err := newLocalAttachmentStorage(root)
+	if err != nil {
+		t.Fatalf("newLocalAttachmentStorage returned error: %v", err)
+	}
+
+	stored, err := storage.Store(AttachmentStorageKey{
+		ProjectID:      7,
+		FormXMLID:      "form",
+		SubmissionUUID: "submission",
+		Filename:       "..",
+	}, strings.NewReader("safe"))
+	if err != nil {
+		t.Fatalf("Store returned error: %v", err)
+	}
+	if filepath.Base(stored.RelativePath) != "%2E%2E" {
+		t.Fatalf("expected encoded dot filename, got %q", stored.RelativePath)
+	}
+}
+
 func TestLocalAttachmentStorageAtomicallyReplacesExistingFile(t *testing.T) {
 	root := t.TempDir()
 	storage, err := newLocalAttachmentStorage(root)
@@ -91,6 +121,17 @@ func TestLocalAttachmentStorageAtomicallyReplacesExistingFile(t *testing.T) {
 	}
 	if string(content) != "new content" {
 		t.Fatalf("unexpected replaced content %q", content)
+	}
+	if !stored.Replaced || stored.Unchanged {
+		t.Fatalf("expected the existing file to be replaced, got %#v", stored)
+	}
+
+	unchanged, err := storage.Store(key, strings.NewReader("new content"))
+	if err != nil {
+		t.Fatalf("third Store returned error: %v", err)
+	}
+	if unchanged.Replaced || !unchanged.Unchanged {
+		t.Fatalf("expected identical content to remain unchanged, got %#v", unchanged)
 	}
 }
 

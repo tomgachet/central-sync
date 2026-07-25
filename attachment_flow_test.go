@@ -79,7 +79,7 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 	if args[0] != 7 || args[2] != "123e4567-e89b-12d3-a456-426614174000" || args[3] != "photo.jpg" {
 		t.Fatalf("unexpected metadata identity arguments: %#v", args)
 	}
-	if args[4] != StorageBackendLocal || args[6] != "image/jpeg" || args[8] != `"photo-v1"` || args[9] != int64(42) {
+	if args[4] != StorageBackendLocal || args[6] != "image/jpeg" || args[9] != `"photo-v1"` || args[10] != int64(42) {
 		t.Fatalf("unexpected storage metadata arguments: %#v", args)
 	}
 }

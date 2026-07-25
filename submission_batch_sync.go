@@ -148,6 +148,27 @@ func syncSubmissionBatch(
 			return stats, fmt.Errorf("submission %s synced in database but attachment sync failed: %w", batch.RootSubmissionUUID, err)
 		}
 
+		for _, attachment := range result.Stored {
+			action := "stored"
+			if attachment.Replaced {
+				action = "replaced"
+			} else if attachment.Unchanged {
+				action = "unchanged"
+			}
+			logInfo(
+				"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s attachment=%q action=%s path=%q bytes=%d sha256=%s",
+				projectID,
+				formXMLID,
+				runID,
+				batch.RootSubmissionUUID,
+				attachment.Name,
+				action,
+				attachment.RelativePath,
+				attachment.SizeBytes,
+				attachment.ChecksumSHA256,
+			)
+		}
+
 		logInfo(
 			"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s attachments_expected=%d attachments_present=%d attachments_stored=%d",
 			projectID,

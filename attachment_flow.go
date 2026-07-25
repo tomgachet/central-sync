@@ -57,6 +57,7 @@ func syncAndPersistSubmissionAttachments(
 			StoragePath:    attachment.RelativePath,
 			ContentType:    attachment.ContentType,
 			SizeBytes:      attachment.SizeBytes,
+			ChecksumSHA256: attachment.ChecksumSHA256,
 			ETag:           attachment.ETag,
 		})
 		if err != nil {

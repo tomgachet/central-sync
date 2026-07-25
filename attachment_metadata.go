@@ -20,6 +20,7 @@ type SubmissionAttachmentMetadata struct {
 	StoragePath    string
 	ContentType    string
 	SizeBytes      int64
+	ChecksumSHA256 string
 	ETag           string
 	SyncedAt       time.Time
 }
@@ -35,17 +36,19 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 			storage_path,
 			content_type,
 			size_bytes,
+			checksum_sha256,
 			etag,
 			last_run_id,
 			synced_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (project_id, form_xml_id, submission_uuid, filename)
 		DO UPDATE SET
 			storage_backend = EXCLUDED.storage_backend,
 			storage_path = EXCLUDED.storage_path,
 			content_type = EXCLUDED.content_type,
 			size_bytes = EXCLUDED.size_bytes,
+			checksum_sha256 = EXCLUDED.checksum_sha256,
 			etag = EXCLUDED.etag,
 			last_run_id = EXCLUDED.last_run_id,
 			synced_at = EXCLUDED.synced_at
@@ -66,6 +69,7 @@ func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttac
 		metadata.StoragePath,
 		metadata.ContentType,
 		metadata.SizeBytes,
+		metadata.ChecksumSHA256,
 		metadata.ETag,
 		metadata.RunID,
 		syncedAt,

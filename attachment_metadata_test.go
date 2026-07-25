@@ -22,6 +22,7 @@ func TestUpsertSubmissionAttachmentMetadata(t *testing.T) {
 		StoragePath:    "project-7/form-site_visit/submission-123/photo.jpg",
 		ContentType:    "image/jpeg",
 		SizeBytes:      1234,
+		ChecksumSHA256: strings.Repeat("a", 64),
 		ETag:           `"photo-v1"`,
 		SyncedAt:       syncedAt,
 	}
@@ -36,10 +37,10 @@ func TestUpsertSubmissionAttachmentMetadata(t *testing.T) {
 	if !strings.Contains(executor.query, "ON CONFLICT (project_id, form_xml_id, submission_uuid, filename)") {
 		t.Fatalf("query does not contain attachment conflict key: %s", executor.query)
 	}
-	if len(executor.args) != 11 {
-		t.Fatalf("expected 11 arguments, got %d", len(executor.args))
+	if len(executor.args) != 12 {
+		t.Fatalf("expected 12 arguments, got %d", len(executor.args))
 	}
-	if executor.args[0] != 7 || executor.args[3] != "photo.jpg" || executor.args[9] != int64(42) || executor.args[10] != syncedAt {
+	if executor.args[0] != 7 || executor.args[3] != "photo.jpg" || executor.args[10] != int64(42) || executor.args[11] != syncedAt {
 		t.Fatalf("unexpected arguments: %#v", executor.args)
 	}
 }
@@ -61,9 +62,9 @@ func TestUpsertSubmissionAttachmentMetadataUsesCurrentTimeByDefault(t *testing.T
 		t.Fatalf("upsertSubmissionAttachmentMetadata returned error: %v", err)
 	}
 
-	syncedAt, ok := executor.args[10].(time.Time)
+	syncedAt, ok := executor.args[11].(time.Time)
 	if !ok || syncedAt.Before(before) || syncedAt.After(time.Now().UTC()) {
-		t.Fatalf("unexpected default sync time: %#v", executor.args[10])
+		t.Fatalf("unexpected default sync time: %#v", executor.args[11])
 	}
 }
 
