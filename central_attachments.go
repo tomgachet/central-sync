@@ -66,7 +66,7 @@ func downloadSubmissionAttachment(
 		url.PathEscape(filename),
 	)
 
-	resp, err := client.GetWithAccept(requestURL, "*/*")
+	resp, err := client.GetAttachment(requestURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download submission attachment %q: %w", filename, err)
 	}

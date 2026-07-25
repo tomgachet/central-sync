@@ -2,12 +2,41 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 )
+
+func TestGetAttachmentUsesDedicatedHTTPClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "*/*" {
+			t.Fatalf("expected attachment Accept header, got %q", got)
+		}
+		_, _ = io.WriteString(w, "attachment")
+	}))
+	defer server.Close()
+
+	client := &CentralClient{
+		Token:                "token",
+		HTTPClient:           &http.Client{Transport: errorRoundTripper{}},
+		AttachmentHTTPClient: server.Client(),
+	}
+	resp, err := client.GetAttachment(server.URL)
+	if err != nil {
+		t.Fatalf("GetAttachment returned error: %v", err)
+	}
+	defer resp.Body.Close()
+}
+
+type errorRoundTripper struct{}
+
+func (errorRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("regular HTTP client must not be used")
+}
 
 func useTempWorkingDir(t *testing.T) {
 	t.Helper()

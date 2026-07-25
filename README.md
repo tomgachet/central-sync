@@ -174,6 +174,8 @@ Path components are escaped before use. Directories use mode `0750` and files us
 
 `central-sync` calculates a SHA-256 checksum while downloading. An existing file with identical content is left unchanged. Different content replaces the file atomically and is reported as `replaced` in the logs. The checksum is stored in attachment metadata.
 
+Attachment downloads use a dedicated 10-minute HTTP timeout. Other Central API requests keep their 30-second timeout.
+
 Stored file metadata is upserted in `central_metadata.submission_attachments`. A download, storage, or metadata error marks the submission as failed, prevents automatic approval, and makes it eligible for the existing failed-submission retry flow.
 
 Each form row in `central_metadata.sync_runs` records `attachments_expected`, `attachments_present`, `attachments_stored`, and `attachments_failed` totals for operational monitoring.

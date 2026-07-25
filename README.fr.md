@@ -172,6 +172,8 @@ Les composants des chemins sont échappés avant utilisation. Les répertoires u
 
 `central-sync` calcule un checksum SHA-256 pendant le téléchargement. Un fichier existant dont le contenu est identique reste inchangé. Un contenu différent remplace le fichier de manière atomique et apparaît avec l'action `replaced` dans les logs. Le checksum est conservé dans les métadonnées de la pièce jointe.
 
+Les téléchargements de pièces jointes utilisent un timeout HTTP dédié de 10 minutes. Les autres requêtes vers l'API Central conservent leur timeout de 30 secondes.
+
 Les métadonnées des fichiers stockés sont mises à jour par UPSERT dans `central_metadata.submission_attachments`. Une erreur de téléchargement, de stockage ou de métadonnées marque la soumission en échec, empêche son approbation automatique et la rend éligible au mécanisme existant de reprise des soumissions en échec.
 
 Chaque ligne de formulaire dans `central_metadata.sync_runs` enregistre les totaux `attachments_expected`, `attachments_present`, `attachments_stored` et `attachments_failed` pour le suivi opérationnel.
