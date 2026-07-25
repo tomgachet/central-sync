@@ -65,6 +65,19 @@ func syncAndPersistSubmissionAttachments(
 		}
 	}
 
+	for _, filename := range result.Missing {
+		if err := markSubmissionAttachmentMissing(
+			db,
+			runID,
+			projectID,
+			formXMLID,
+			trimUUIDPrefix(submissionUUID),
+			filename,
+		); err != nil {
+			return result, err
+		}
+	}
+
 	return result, nil
 }
 

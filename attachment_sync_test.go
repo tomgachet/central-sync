@@ -32,8 +32,11 @@ func TestSyncSubmissionAttachmentsStoresPresentAttachments(t *testing.T) {
 		t.Fatalf("syncSubmissionAttachments returned error: %v", err)
 	}
 
-	if result.Expected != 2 || result.Present != 1 || len(result.Stored) != 1 {
+	if result.Expected != 2 || result.Present != 1 || len(result.Stored) != 1 || len(result.Missing) != 1 {
 		t.Fatalf("unexpected sync result: %#v", result)
+	}
+	if result.Missing[0] != "missing.jpg" {
+		t.Fatalf("unexpected missing attachments: %#v", result.Missing)
 	}
 	if len(storage.calls) != 1 {
 		t.Fatalf("expected 1 storage call, got %d", len(storage.calls))

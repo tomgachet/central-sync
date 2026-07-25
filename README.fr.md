@@ -162,6 +162,8 @@ Les noms de tables doivent être uniques au sein d'un même projet, entre les ma
 
 Quand `sync_attachments: true`, les pièces jointes sont synchronisées après le commit des lignes de la soumission dans PostgreSQL et avant l'application de `approve_after_sync`. Les fichiers signalés comme absents par Central sont comptabilisés, mais ne sont pas téléchargés.
 
+Si une pièce jointe déjà synchronisée est ensuite signalée avec `exists: false`, son fichier local est conservé afin d'éviter toute perte automatique de données. Ses métadonnées passent à `central_exists: false` avec une date `missing_at`, et un avertissement est journalisé. Si le fichier redevient disponible, une synchronisation réussie efface `missing_at` et rétablit `central_exists: true`.
+
 Le backend local écrit les fichiers de manière atomique sous `local_directory` avec cette arborescence :
 
 ```text

@@ -168,6 +168,16 @@ func syncSubmissionBatch(
 				attachment.ChecksumSHA256,
 			)
 		}
+		for _, filename := range result.Missing {
+			logWarn(
+				"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s attachment=%q action=missing_in_central local_file_retained=true",
+				projectID,
+				formXMLID,
+				runID,
+				batch.RootSubmissionUUID,
+				filename,
+			)
+		}
 
 		logInfo(
 			"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s attachments_expected=%d attachments_present=%d attachments_stored=%d",

@@ -164,6 +164,8 @@ Table names must be unique inside the same project across dataset and form mappi
 
 When `sync_attachments: true`, attachments are synchronized after the submission rows have been committed to PostgreSQL and before `approve_after_sync` is applied. Files reported as missing by Central are counted but not downloaded.
 
+If a previously synchronized attachment is later reported with `exists: false`, its local file is retained to avoid automatic data loss. Its metadata is updated with `central_exists: false` and `missing_at`, and a warning is logged. If the file becomes available again, a successful synchronization clears `missing_at` and restores `central_exists: true`.
+
 The local backend writes files atomically below `local_directory` using this layout:
 
 ```text

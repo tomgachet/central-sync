@@ -79,6 +79,32 @@ func TestUpsertSubmissionAttachmentMetadataReturnsDatabaseError(t *testing.T) {
 	}
 }
 
+func TestMarkSubmissionAttachmentMissing(t *testing.T) {
+	executor := &recordingSQLExecutor{}
+	before := time.Now().UTC()
+	err := markSubmissionAttachmentMissing(
+		executor,
+		42,
+		7,
+		"site_visit",
+		"123e4567-e89b-12d3-a456-426614174000",
+		"photo.jpg",
+	)
+	if err != nil {
+		t.Fatalf("markSubmissionAttachmentMissing returned error: %v", err)
+	}
+	if !strings.Contains(executor.query, "central_exists = FALSE") || !strings.Contains(executor.query, "missing_at = $5") {
+		t.Fatalf("unexpected missing attachment query: %s", executor.query)
+	}
+	if len(executor.args) != 6 || executor.args[0] != 7 || executor.args[3] != "photo.jpg" || executor.args[5] != int64(42) {
+		t.Fatalf("unexpected missing attachment arguments: %#v", executor.args)
+	}
+	missingAt, ok := executor.args[4].(time.Time)
+	if !ok || missingAt.Before(before) || missingAt.After(time.Now().UTC()) {
+		t.Fatalf("unexpected missing timestamp: %#v", executor.args[4])
+	}
+}
+
 type recordingSQLExecutor struct {
 	query string
 	args  []interface{}

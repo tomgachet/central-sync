@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS central_metadata.submission_attachments (
         CHECK (size_bytes >= 0),
     checksum_sha256 CHAR(64) NOT NULL,
     etag TEXT,
+    central_exists BOOLEAN NOT NULL DEFAULT TRUE,
+    missing_at TIMESTAMPTZ,
     last_run_id BIGINT NOT NULL
         CONSTRAINT submission_attachments_last_run_id_fkey
         REFERENCES central_metadata.sync_runs (run_id),

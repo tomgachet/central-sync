@@ -20,6 +20,7 @@ type AttachmentSyncResult struct {
 	Expected int
 	Present  int
 	Stored   []SyncedAttachment
+	Missing  []string
 }
 
 func syncSubmissionAttachments(
@@ -46,6 +47,7 @@ func syncSubmissionAttachments(
 
 	for _, attachment := range attachments {
 		if !attachment.Exists {
+			result.Missing = append(result.Missing, attachment.Name)
 			continue
 		}
 

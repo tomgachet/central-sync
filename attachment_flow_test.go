@@ -47,7 +47,7 @@ func TestConfiguredAttachmentStorageBuildsLocalBackend(t *testing.T) {
 func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/attachments") {
-			_, _ = io.WriteString(w, `[{"name":"photo.jpg","exists":true}]`)
+			_, _ = io.WriteString(w, `[{"name":"photo.jpg","exists":true},{"name":"cleared.jpg","exists":false}]`)
 			return
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -72,8 +72,8 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 		t.Fatalf("syncAndPersistSubmissionAttachments returned error: %v", err)
 	}
 
-	if len(result.Stored) != 1 || len(executor.calls) != 1 {
-		t.Fatalf("expected one stored attachment and metadata upsert, got result=%#v calls=%d", result, len(executor.calls))
+	if len(result.Stored) != 1 || len(result.Missing) != 1 || len(executor.calls) != 2 {
+		t.Fatalf("expected one stored and one missing attachment metadata update, got result=%#v calls=%d", result, len(executor.calls))
 	}
 	args := executor.calls[0]
 	if args[0] != 7 || args[2] != "123e4567-e89b-12d3-a456-426614174000" || args[3] != "photo.jpg" {
@@ -81,6 +81,10 @@ func TestSyncAndPersistSubmissionAttachments(t *testing.T) {
 	}
 	if args[4] != StorageBackendLocal || args[6] != "image/jpeg" || args[9] != `"photo-v1"` || args[10] != int64(42) {
 		t.Fatalf("unexpected storage metadata arguments: %#v", args)
+	}
+	missingArgs := executor.calls[1]
+	if missingArgs[0] != 7 || missingArgs[2] != "123e4567-e89b-12d3-a456-426614174000" || missingArgs[3] != "cleared.jpg" || missingArgs[5] != int64(42) {
+		t.Fatalf("unexpected missing metadata arguments: %#v", missingArgs)
 	}
 }
 
