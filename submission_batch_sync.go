@@ -25,6 +25,8 @@ func syncSubmissionBatch(
 	formXMLID string,
 	syncMode string,
 	approveAfterSync bool,
+	syncAttachments bool,
+	attachmentStorage AttachmentStorage,
 	batch *SubmissionBatch,
 ) (*SyncStats, error) {
 	stats := &SyncStats{
@@ -107,6 +109,49 @@ func syncSubmissionBatch(
 
 	if err := tx.Commit(); err != nil {
 		return stats, fmt.Errorf("failed to commit submission %s: %w", batch.RootSubmissionUUID, err)
+	}
+
+	if syncAttachments {
+		result, err := syncAndPersistSubmissionAttachments(
+			db,
+			client,
+			attachmentStorage,
+			runID,
+			projectID,
+			formXMLID,
+			batch.RootSubmissionUUID,
+		)
+		if err != nil {
+			errorMessage := err.Error()
+			failedSubmissionUUID := batch.RootSubmissionUUID
+			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{
+				RunID:          runID,
+				ProjectID:      projectID,
+				FormXMLID:      &formXMLID,
+				ObjectType:     "form_submission",
+				ObjectName:     batch.RootRow.FormTable.ODataName,
+				SQLTableName:   batch.RootRow.FormTable.SQLName,
+				SubmissionUUID: &failedSubmissionUUID,
+				SyncAction:     "media_sync_failed",
+				SyncStatus:     "failed",
+				RowsFetched:    0,
+				RowsFailed:     1,
+				ErrorMessage:   &errorMessage,
+			})
+
+			return stats, fmt.Errorf("submission %s synced in database but attachment sync failed: %w", batch.RootSubmissionUUID, err)
+		}
+
+		logInfo(
+			"[FORM] project_id=%d form=%q run_id=%d submission_uuid=%s attachments_expected=%d attachments_present=%d attachments_stored=%d",
+			projectID,
+			formXMLID,
+			runID,
+			batch.RootSubmissionUUID,
+			result.Expected,
+			result.Present,
+			len(result.Stored),
+		)
 	}
 
 	if approveAfterSync {

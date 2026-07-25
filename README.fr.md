@@ -158,6 +158,20 @@ projects:
 
 Les noms de tables doivent être uniques au sein d'un même projet, entre les mappings datasets et formulaires.
 
+### Synchronisation des pièces jointes des soumissions
+
+Quand `sync_attachments: true`, les pièces jointes sont synchronisées après le commit des lignes de la soumission dans PostgreSQL et avant l'application de `approve_after_sync`. Les fichiers signalés comme absents par Central sont comptabilisés, mais ne sont pas téléchargés.
+
+Le backend local écrit les fichiers de manière atomique sous `local_directory` avec cette arborescence :
+
+```text
+project-{project_id}/form-{xml_form_id}/submission-{submission_uuid}/{filename}
+```
+
+Les composants des chemins sont échappés avant utilisation. Les répertoires utilisent le mode `0750` et les fichiers le mode `0640` ; l'utilisateur système qui exécute `central-sync` doit pouvoir créer et écrire sous `local_directory`. Incluez ce répertoire dans les sauvegardes avec la base du projet.
+
+Les métadonnées des fichiers stockés sont mises à jour par UPSERT dans `central_metadata.submission_attachments`. Une erreur de téléchargement, de stockage ou de métadonnées marque la soumission en échec, empêche son approbation automatique et la rend éligible au mécanisme existant de reprise des soumissions en échec.
+
 ## Configuration PostgreSQL
 
 Chaque projet configuré pointe vers une base PostgreSQL. Cette base doit déjà exister et contenir les schémas et tables de métadonnées requis.

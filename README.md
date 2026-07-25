@@ -160,6 +160,20 @@ projects:
 
 Table names must be unique inside the same project across dataset and form mappings.
 
+### Submission Attachment Synchronization
+
+When `sync_attachments: true`, attachments are synchronized after the submission rows have been committed to PostgreSQL and before `approve_after_sync` is applied. Files reported as missing by Central are counted but not downloaded.
+
+The local backend writes files atomically below `local_directory` using this layout:
+
+```text
+project-{project_id}/form-{xml_form_id}/submission-{submission_uuid}/{filename}
+```
+
+Path components are escaped before use. Directories use mode `0750` and files use mode `0640`; the operating-system user running `central-sync` must be able to create and write below `local_directory`. Include this directory in backups together with the project database.
+
+Stored file metadata is upserted in `central_metadata.submission_attachments`. A download, storage, or metadata error marks the submission as failed, prevents automatic approval, and makes it eligible for the existing failed-submission retry flow.
+
 ## PostgreSQL Setup
 
 Each configured project points to one PostgreSQL database. That database must already exist and contain the required schemas and metadata tables.

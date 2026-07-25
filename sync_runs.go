@@ -26,6 +26,7 @@ type SyncRunFinishParams struct {
 	RowsInserted int
 	RowsUpdated  int
 	RowsSkipped  int
+	RowsFailed   int
 	ErrorMessage *string
 }
 
@@ -76,7 +77,7 @@ func startSyncRun(db DBExecutor, params SyncRunStartParams) (int64, error) {
 	return runID, nil
 }
 
-func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
+func finishSyncRun(db sqlExecutor, params SyncRunFinishParams) error {
 	query := fmt.Sprintf(`
 		UPDATE %s.sync_runs
 		SET
@@ -86,7 +87,8 @@ func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
 			rows_inserted = $5,
 			rows_updated = $6,
 			rows_skipped = $7,
-			error_message = $8
+			rows_failed = $8,
+			error_message = $9
 		WHERE run_id = $1
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -99,6 +101,7 @@ func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
 		params.RowsInserted,
 		params.RowsUpdated,
 		params.RowsSkipped,
+		params.RowsFailed,
 		params.ErrorMessage,
 	)
 	if err != nil {

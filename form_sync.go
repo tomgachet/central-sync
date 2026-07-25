@@ -7,16 +7,32 @@ import (
 	"github.com/google/uuid"
 )
 
-func syncAllForms(syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
+func syncAllForms(
+	syncID uuid.UUID,
+	projects []ProjectMapping,
+	client *CentralClient,
+	storageConfig AttachmentStorageConfig,
+) {
+	attachmentStorage, err := configuredAttachmentStorage(projects, storageConfig)
+	if err != nil {
+		logError("[FORM] sync_id=%s attachment storage error: %v", syncID, err)
+		return
+	}
+
 	for _, project := range projects {
-		err := syncProjectForms(syncID, project, client)
+		err := syncProjectForms(syncID, project, client, attachmentStorage)
 		if err != nil {
 			logError("[PROJECT] sync_id=%s form sync error: %v", syncID, err)
 		}
 	}
 }
 
-func syncProjectForms(syncID uuid.UUID, project ProjectMapping, client *CentralClient) error {
+func syncProjectForms(
+	syncID uuid.UUID,
+	project ProjectMapping,
+	client *CentralClient,
+	attachmentStorage AttachmentStorage,
+) error {
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
@@ -61,7 +77,7 @@ func syncProjectForms(syncID uuid.UUID, project ProjectMapping, client *CentralC
 	}
 
 	for _, form := range formsToSync {
-		err := syncSingleForm(syncID, db, project, form, client)
+		err := syncSingleForm(syncID, db, project, form, client, attachmentStorage)
 		if err != nil {
 			logError(
 				"[FORM] sync_id=%s project_id=%d form=%q table=%s sync error: %v",
@@ -77,7 +93,14 @@ func syncProjectForms(syncID uuid.UUID, project ProjectMapping, client *CentralC
 	return nil
 }
 
-func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form FormMapping, client *CentralClient) error {
+func syncSingleForm(
+	syncID uuid.UUID,
+	db *sql.DB,
+	project ProjectMapping,
+	form FormMapping,
+	client *CentralClient,
+	attachmentStorage AttachmentStorage,
+) error {
 	logInfo(
 		"[FORM] sync_id=%s project_id=%d form=%q table=%s mode=%s starting sync",
 		syncID,
@@ -94,6 +117,15 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 
 	if !exists {
 		return fmt.Errorf("form %s does not exist in ODK Central", form.XMLFormID)
+	}
+
+	if shouldSyncAttachments(form) {
+		if attachmentStorage == nil {
+			return fmt.Errorf("attachment storage is not configured for form %s", form.XMLFormID)
+		}
+		if err := requireSubmissionAttachmentMetadataTable(db); err != nil {
+			return fmt.Errorf("attachment metadata table error for form %s: %w", form.XMLFormID, err)
+		}
 	}
 
 	formTables, err := getFormTables(client, project.ProjectID, form.XMLFormID, form.TableName)
@@ -151,7 +183,7 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 	}
 
 	logInfo(
-		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d started approved_only=%t approve_after_sync=%t",
+		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d started approved_only=%t approve_after_sync=%t sync_attachments=%t",
 		syncID,
 		project.ProjectID,
 		form.XMLFormID,
@@ -159,6 +191,7 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 		syncRunID,
 		approvedOnly,
 		approveAfterSync,
+		shouldSyncAttachments(form),
 	)
 
 	rowsByTable := make(map[string][]map[string]interface{})
@@ -304,10 +337,23 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 			form.XMLFormID,
 			syncMode,
 			approveAfterSync,
+			shouldSyncAttachments(form),
+			attachmentStorage,
 			batch,
 		)
 
+		if batchStats != nil {
+			totalStats.RowsFetched += batchStats.RowsFetched
+			totalStats.RowsInserted += batchStats.RowsInserted
+			totalStats.RowsUpdated += batchStats.RowsUpdated
+			totalStats.RowsSkipped += batchStats.RowsSkipped
+			totalStats.RowsFailed += batchStats.RowsFailed
+			totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
+			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
+		}
+
 		if err != nil {
+			totalStats.RowsFailed++
 			hadFailure = true
 			msg := err.Error()
 			if firstErrorMessage == nil {
@@ -325,15 +371,6 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 			continue
 		}
 
-		if batchStats != nil {
-			totalStats.RowsFetched += batchStats.RowsFetched
-			totalStats.RowsInserted += batchStats.RowsInserted
-			totalStats.RowsUpdated += batchStats.RowsUpdated
-			totalStats.RowsSkipped += batchStats.RowsSkipped
-			totalStats.RowsFailed += batchStats.RowsFailed
-			totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
-			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
-		}
 	}
 
 	finalStatus := "success"
@@ -348,6 +385,7 @@ func syncSingleForm(syncID uuid.UUID, db *sql.DB, project ProjectMapping, form F
 		RowsInserted: totalStats.RowsInserted,
 		RowsUpdated:  totalStats.RowsUpdated,
 		RowsSkipped:  totalStats.RowsSkipped,
+		RowsFailed:   totalStats.RowsFailed,
 		ErrorMessage: firstErrorMessage,
 	})
 	if err != nil {
