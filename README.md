@@ -183,6 +183,12 @@ Historical metadata rows keep a NULL `sync_id` because their original process la
 
 The migration also validates the foreign key from `sync_runs_detail.run_id` to `sync_runs.run_id`. It stops without committing if historical orphan detail rows exist; resolve those rows before retrying the migration.
 
+For an upgrade from 0.3.x to 0.4.0, replace `your_central_user` in the migration with the PostgreSQL role used by `central-sync`, then run:
+
+```sh
+psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
+```
+
 The structure script creates:
 
 - `central_datasets`
@@ -190,6 +196,7 @@ The structure script creates:
 - `central_metadata`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
+- `central_metadata.submission_attachments`
 - metadata views used for incremental sync and retry tracking
 
 The privileges script is a template. Replace `your_central_user`, `your_central_user_password` and `your_database` before running it.

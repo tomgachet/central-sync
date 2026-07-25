@@ -51,11 +51,33 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS central_metadata.submission_attachments (
+    project_id INT NOT NULL,
+    form_xml_id VARCHAR(100) NOT NULL,
+    submission_uuid UUID NOT NULL,
+    filename TEXT NOT NULL,
+    storage_backend VARCHAR(20) NOT NULL,
+    storage_path TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes BIGINT NOT NULL
+        CONSTRAINT submission_attachments_size_bytes_check
+        CHECK (size_bytes >= 0),
+    etag TEXT,
+    last_run_id BIGINT NOT NULL
+        CONSTRAINT submission_attachments_last_run_id_fkey
+        REFERENCES central_metadata.sync_runs (run_id),
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, form_xml_id, submission_uuid, filename)
+);
+
 CREATE INDEX IF NOT EXISTS sync_runs_sync_id_idx
     ON central_metadata.sync_runs (sync_id);
 
 CREATE INDEX IF NOT EXISTS sync_runs_detail_run_id_idx
     ON central_metadata.sync_runs_detail (run_id);
+
+CREATE INDEX IF NOT EXISTS submission_attachments_last_run_id_idx
+    ON central_metadata.submission_attachments (last_run_id);
 
 CREATE OR REPLACE VIEW central_metadata.last_successful_submissions_sync AS
 SELECT

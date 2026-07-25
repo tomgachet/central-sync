@@ -181,6 +181,12 @@ Les anciennes lignes de métadonnées conservent un `sync_id` NULL, car leur lan
 
 La migration valide également la clé étrangère de `sync_runs_detail.run_id` vers `sync_runs.run_id`. Elle s'arrête sans valider la transaction si des détails historiques orphelins existent ; corrigez ces lignes avant de relancer la migration.
 
+Pour une mise à jour de 0.3.x vers 0.4.0, remplacez `your_central_user` dans la migration par le rôle PostgreSQL utilisé par `central-sync`, puis exécutez :
+
+```sh
+psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
+```
+
 Le script de structure crée :
 
 - `central_datasets`
@@ -188,6 +194,7 @@ Le script de structure crée :
 - `central_metadata`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
+- `central_metadata.submission_attachments`
 - les vues de métadonnées utilisées pour la synchronisation incrémentale et le suivi des reprises
 
 Le script de privilèges est un template. Remplacez `your_central_user`, `your_central_user_password` et `your_database` avant de l'exécuter.
