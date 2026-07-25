@@ -348,6 +348,10 @@ func syncSingleForm(
 			totalStats.RowsUpdated += batchStats.RowsUpdated
 			totalStats.RowsSkipped += batchStats.RowsSkipped
 			totalStats.RowsFailed += batchStats.RowsFailed
+			totalStats.AttachmentsExpected += batchStats.AttachmentsExpected
+			totalStats.AttachmentsPresent += batchStats.AttachmentsPresent
+			totalStats.AttachmentsStored += batchStats.AttachmentsStored
+			totalStats.AttachmentsFailed += batchStats.AttachmentsFailed
 			totalStats.SyncOutSubmissionDate = maxTimePtr(totalStats.SyncOutSubmissionDate, batchStats.SyncOutSubmissionDate)
 			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
 		}
@@ -370,7 +374,6 @@ func syncSingleForm(
 			)
 			continue
 		}
-
 	}
 
 	finalStatus := "success"
@@ -379,21 +382,25 @@ func syncSingleForm(
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
-		RunID:        syncRunID,
-		SyncStatus:   finalStatus,
-		RowsFetched:  totalStats.RowsFetched,
-		RowsInserted: totalStats.RowsInserted,
-		RowsUpdated:  totalStats.RowsUpdated,
-		RowsSkipped:  totalStats.RowsSkipped,
-		RowsFailed:   totalStats.RowsFailed,
-		ErrorMessage: firstErrorMessage,
+		RunID:               syncRunID,
+		SyncStatus:          finalStatus,
+		RowsFetched:         totalStats.RowsFetched,
+		RowsInserted:        totalStats.RowsInserted,
+		RowsUpdated:         totalStats.RowsUpdated,
+		RowsSkipped:         totalStats.RowsSkipped,
+		RowsFailed:          totalStats.RowsFailed,
+		AttachmentsExpected: totalStats.AttachmentsExpected,
+		AttachmentsPresent:  totalStats.AttachmentsPresent,
+		AttachmentsStored:   totalStats.AttachmentsStored,
+		AttachmentsFailed:   totalStats.AttachmentsFailed,
+		ErrorMessage:        firstErrorMessage,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to finalize sync run for form %s: %w", form.XMLFormID, err)
 	}
 
 	logInfo(
-		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d status=%s batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d",
+		"[FORM] sync_id=%s project_id=%d form=%q table=%s run_id=%d status=%s batches=%d fetched=%d inserted=%d updated=%d skipped=%d failed=%d attachments_expected=%d attachments_present=%d attachments_stored=%d attachments_failed=%d",
 		syncID,
 		project.ProjectID,
 		form.XMLFormID,
@@ -406,6 +413,10 @@ func syncSingleForm(
 		totalStats.RowsUpdated,
 		totalStats.RowsSkipped,
 		totalStats.RowsFailed,
+		totalStats.AttachmentsExpected,
+		totalStats.AttachmentsPresent,
+		totalStats.AttachmentsStored,
+		totalStats.AttachmentsFailed,
 	)
 
 	return nil

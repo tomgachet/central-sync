@@ -174,6 +174,8 @@ Path components are escaped before use. Directories use mode `0750` and files us
 
 Stored file metadata is upserted in `central_metadata.submission_attachments`. A download, storage, or metadata error marks the submission as failed, prevents automatic approval, and makes it eligible for the existing failed-submission retry flow.
 
+Each form row in `central_metadata.sync_runs` records `attachments_expected`, `attachments_present`, `attachments_stored`, and `attachments_failed` totals for operational monitoring.
+
 ## PostgreSQL Setup
 
 Each configured project points to one PostgreSQL database. That database must already exist and contain the required schemas and metadata tables.

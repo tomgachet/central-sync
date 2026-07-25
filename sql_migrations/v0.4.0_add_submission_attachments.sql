@@ -3,6 +3,12 @@
 
 BEGIN;
 
+ALTER TABLE central_metadata.sync_runs
+    ADD COLUMN IF NOT EXISTS attachments_expected INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attachments_present INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attachments_stored INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attachments_failed INT NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS central_metadata.submission_attachments (
     project_id INT NOT NULL,
     form_xml_id VARCHAR(100) NOT NULL,

@@ -121,7 +121,13 @@ func syncSubmissionBatch(
 			formXMLID,
 			batch.RootSubmissionUUID,
 		)
+		if result != nil {
+			stats.AttachmentsExpected = result.Expected
+			stats.AttachmentsPresent = result.Present
+			stats.AttachmentsStored = len(result.Stored)
+		}
 		if err != nil {
+			stats.AttachmentsFailed++
 			errorMessage := err.Error()
 			failedSubmissionUUID := batch.RootSubmissionUUID
 			_ = insertSyncRunDetail(db, SyncRunDetailInsertParams{

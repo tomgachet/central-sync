@@ -172,6 +172,8 @@ Les composants des chemins sont échappés avant utilisation. Les répertoires u
 
 Les métadonnées des fichiers stockés sont mises à jour par UPSERT dans `central_metadata.submission_attachments`. Une erreur de téléchargement, de stockage ou de métadonnées marque la soumission en échec, empêche son approbation automatique et la rend éligible au mécanisme existant de reprise des soumissions en échec.
 
+Chaque ligne de formulaire dans `central_metadata.sync_runs` enregistre les totaux `attachments_expected`, `attachments_present`, `attachments_stored` et `attachments_failed` pour le suivi opérationnel.
+
 ## Configuration PostgreSQL
 
 Chaque projet configuré pointe vers une base PostgreSQL. Cette base doit déjà exister et contenir les schémas et tables de métadonnées requis.

@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs (
     rows_deleted INT NOT NULL DEFAULT 0,
     rows_skipped INT NOT NULL DEFAULT 0,
     rows_failed INT NOT NULL DEFAULT 0,
+    attachments_expected INT NOT NULL DEFAULT 0,
+    attachments_present INT NOT NULL DEFAULT 0,
+    attachments_stored INT NOT NULL DEFAULT 0,
+    attachments_failed INT NOT NULL DEFAULT 0,
     error_message TEXT
 );
 
