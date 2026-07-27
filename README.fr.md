@@ -290,6 +290,8 @@ Si une seconde exécution démarre pendant que le verrou est détenu, elle journ
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Lit le document de service OData du formulaire et découvre les tables racine et repeat. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Lit les métadonnées OData XML pour les schémas des tables de formulaire. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/{odataTableUrl}` | Récupère les lignes de soumission depuis les tables OData, y compris `Submissions` et les tables repeat. Utilise `$top=1000`, `$count=true`, un `$filter` optionnel, et suit `@odata.nextLink`. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments` | Liste les pièces jointes déclarées pour une soumission quand `sync_attachments` est activé. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments/{filename}` | Télécharge une pièce jointe individuelle quand `sync_attachments` est activé. |
 | `PATCH` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}` | Définit `reviewState` à `approved` quand `approve_after_sync` est activé. |
 | `POST` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/comments` | Ajoute un commentaire de synchronisation après approbation. |
 | `GET` | `/v1/projects/{projectId}/datasets/{datasetName}` | Lit les métadonnées et propriétés du dataset. |

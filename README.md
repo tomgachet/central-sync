@@ -292,6 +292,8 @@ If a second run starts while the lock is held, it logs a `sync lock error` and e
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Reads the form OData service document and discovers root and repeat tables. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Reads OData metadata XML for form table schemas. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/{odataTableUrl}` | Fetches submission rows from OData tables, including `Submissions` and repeat tables. Uses `$top=1000`, `$count=true`, optional `$filter`, and follows `@odata.nextLink`. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments` | Lists the attachments declared for a submission when `sync_attachments` is enabled. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments/{filename}` | Downloads an individual submission attachment when `sync_attachments` is enabled. |
 | `PATCH` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}` | Sets `reviewState` to `approved` when `approve_after_sync` is enabled. |
 | `POST` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/comments` | Adds a sync comment after approval. |
 | `GET` | `/v1/projects/{projectId}/datasets/{datasetName}` | Reads dataset metadata and properties. |
