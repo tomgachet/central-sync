@@ -14,10 +14,12 @@ GRANT CONNECT ON DATABASE your_database TO your_central_user;
 GRANT ALL ON SCHEMA central_datasets TO your_central_user;
 GRANT ALL ON SCHEMA central_submissions TO your_central_user;
 GRANT ALL ON SCHEMA central_metadata TO your_central_user;
+GRANT ALL ON SCHEMA central_users TO your_central_user;
 
 ALTER TABLE central_metadata.sync_runs OWNER TO your_central_user;
 ALTER TABLE central_metadata.sync_runs_detail OWNER TO your_central_user;
 ALTER TABLE central_metadata.submission_attachments OWNER TO your_central_user;
+ALTER TABLE central_users.app_users OWNER TO your_central_user;
 
 ALTER VIEW central_metadata.last_successful_submissions_sync OWNER TO your_central_user;
 ALTER VIEW central_metadata.last_successful_datasets_sync OWNER TO your_central_user;
