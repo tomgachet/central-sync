@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     sql_table_name VARCHAR(150) NOT NULL,
     submission_uuid UUID,
     entity_uuid UUID,
+    app_user_id BIGINT,
     central_submission_date TIMESTAMPTZ,
     central_created_at TIMESTAMPTZ,
     central_updated_at TIMESTAMPTZ,
@@ -109,6 +110,10 @@ CREATE INDEX IF NOT EXISTS sync_runs_sync_id_idx
 
 CREATE INDEX IF NOT EXISTS sync_runs_detail_run_id_idx
     ON central_metadata.sync_runs_detail (run_id);
+
+CREATE INDEX IF NOT EXISTS sync_runs_detail_app_user_idx
+    ON central_metadata.sync_runs_detail (project_id, app_user_id)
+    WHERE app_user_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS submission_attachments_last_run_id_idx
     ON central_metadata.submission_attachments (last_run_id);

@@ -11,6 +11,7 @@ import (
 
 const reconcileAppUserQueryPattern = `(?s)WITH existing AS .*INSERT INTO "central_users"\.app_users .*ON CONFLICT \(project_id, app_user_id\).*SELECT CASE`
 const markMissingAppUsersQueryPattern = `(?s)UPDATE "central_users"\.app_users.*missing_from_central = TRUE.*RETURNING app_user_id`
+const insertAppUserDetailQueryPattern = `(?s)INSERT INTO "central_metadata"\.sync_runs_detail .*app_user_id.*VALUES`
 
 func TestReconcileProjectAppUsersCommitsCompleteSnapshot(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -43,7 +44,10 @@ func TestReconcileProjectAppUsersCommitsCompleteSnapshot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"action"}).AddRow(AppUserActionInserted))
 	mock.ExpectQuery(markMissingAppUsersQueryPattern).
 		WithArgs(7, sqlmock.AnyArg(), sqlmock.AnyArg(), int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"app_user_id"}).AddRow(int64(99)))
+		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}).
+			AddRow(int64(99), "Missing Collector"))
+	expectAppUserDetailInsert(mock)
+	expectAppUserDetailInsert(mock)
 	mock.ExpectCommit()
 
 	results, err := reconcileProjectAppUsers(db, 42, 7, []CentralAppUser{{
@@ -57,8 +61,10 @@ func TestReconcileProjectAppUsersCommitsCompleteSnapshot(t *testing.T) {
 		t.Fatalf("reconcileProjectAppUsers returned error: %v", err)
 	}
 	if len(results) != 2 ||
-		results[0] != (AppUserReconcileResult{AppUserID: 115, Action: AppUserActionInserted}) ||
-		results[1] != (AppUserReconcileResult{AppUserID: 99, Action: AppUserActionMarkedMissing}) {
+		results[0].AppUserID != 115 ||
+		results[0].Action != AppUserActionInserted ||
+		results[1].AppUserID != 99 ||
+		results[1].Action != AppUserActionMarkedMissing {
 		t.Fatalf("unexpected reconciliation results: %+v", results)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -77,7 +83,8 @@ func TestReconcileProjectAppUsersRestoresExistingUser(t *testing.T) {
 	mock.ExpectQuery(reconcileAppUserQueryPattern).
 		WillReturnRows(sqlmock.NewRows([]string{"action"}).AddRow(AppUserActionRestored))
 	mock.ExpectQuery(markMissingAppUsersQueryPattern).
-		WillReturnRows(sqlmock.NewRows([]string{"app_user_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}))
+	expectAppUserDetailInsert(mock)
 	mock.ExpectCommit()
 
 	results, err := reconcileProjectAppUsers(db, 42, 7, []CentralAppUser{{
@@ -103,9 +110,11 @@ func TestReconcileProjectAppUsersMarksAllExistingUsersMissingForEmptySnapshot(t 
 	mock.ExpectBegin()
 	mock.ExpectQuery(markMissingAppUsersQueryPattern).
 		WithArgs(7, sqlmock.AnyArg(), sqlmock.AnyArg(), int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"app_user_id"}).
-			AddRow(int64(115)).
-			AddRow(int64(116)))
+		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}).
+			AddRow(int64(115), "Collector North").
+			AddRow(int64(116), "Collector South"))
+	expectAppUserDetailInsert(mock)
+	expectAppUserDetailInsert(mock)
 	mock.ExpectCommit()
 
 	results, err := reconcileProjectAppUsers(db, 42, 7, nil)
@@ -117,6 +126,11 @@ func TestReconcileProjectAppUsersMarksAllExistingUsersMissingForEmptySnapshot(t 
 		results[1].Action != AppUserActionMarkedMissing {
 		t.Fatalf("unexpected reconciliation results: %+v", results)
 	}
+}
+
+func expectAppUserDetailInsert(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(insertAppUserDetailQueryPattern).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 }
 
 func TestReconcileProjectAppUsersRollsBackOnUpsertFailure(t *testing.T) {
@@ -173,10 +187,13 @@ func TestAppUserSchemaUsesCompositeIdentityAndMissingState(t *testing.T) {
 		"PRIMARY KEY (project_id, app_user_id)",
 		"missing_from_central BOOLEAN NOT NULL DEFAULT FALSE",
 		"properties JSONB NOT NULL DEFAULT '{}'::jsonb",
+		"app_user_id BIGINT",
+		"sync_runs_detail_app_user_idx",
 	})
 	assertSQLFileContains(t, "sql_migrations/v0.5.0_add_app_users.sql", []string{
 		"CREATE SCHEMA IF NOT EXISTS central_users",
 		"CREATE TABLE IF NOT EXISTS central_users.app_users",
+		"ADD COLUMN IF NOT EXISTS app_user_id BIGINT",
 		"ALTER TABLE central_users.app_users OWNER TO your_central_user",
 	})
 }

@@ -65,7 +65,9 @@ func activeProjectDatabaseNames(projects []ProjectMapping) []string {
 	var names []string
 
 	for _, project := range projects {
-		if len(getDatasetsToSync(project)) == 0 && len(getFormsToSync(project)) == 0 {
+		if len(getDatasetsToSync(project)) == 0 &&
+			len(getFormsToSync(project)) == 0 &&
+			!project.SyncAppUsers {
 			continue
 		}
 

@@ -15,6 +15,7 @@ type SyncRunDetailInsertParams struct {
 	SQLTableName          string
 	SubmissionUUID        *string
 	EntityUUID            *string
+	AppUserID             *int64
 	CentralCreatedAt      *time.Time
 	CentralSubmissionDate *time.Time
 	CentralUpdatedAt      *time.Time
@@ -66,6 +67,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 			sql_table_name,
 			submission_uuid,
 			entity_uuid,
+			app_user_id,
 			central_created_at,
 			central_submission_date,
 			central_updated_at,
@@ -83,7 +85,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
 		)
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -97,6 +99,7 @@ func insertSyncRunDetail(db DBExecutor, params SyncRunDetailInsertParams) error 
 		params.SQLTableName,
 		params.SubmissionUUID,
 		params.EntityUUID,
+		params.AppUserID,
 		params.CentralCreatedAt,
 		params.CentralSubmissionDate,
 		params.CentralUpdatedAt,

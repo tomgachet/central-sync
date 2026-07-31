@@ -7,6 +7,13 @@ CREATE SCHEMA IF NOT EXISTS central_users;
 
 GRANT ALL ON SCHEMA central_users TO your_central_user;
 
+ALTER TABLE central_metadata.sync_runs_detail
+    ADD COLUMN IF NOT EXISTS app_user_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS sync_runs_detail_app_user_idx
+    ON central_metadata.sync_runs_detail (project_id, app_user_id)
+    WHERE app_user_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS central_users.app_users (
     project_id INT NOT NULL,
     app_user_id BIGINT NOT NULL,

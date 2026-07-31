@@ -20,8 +20,12 @@ const (
 )
 
 type AppUserReconcileResult struct {
-	AppUserID int64
-	Action    string
+	AppUserID        int64
+	DisplayName      string
+	CentralCreatedAt *time.Time
+	CentralUpdatedAt *time.Time
+	CentralDeletedAt *time.Time
+	Action           string
 }
 
 func reconcileProjectAppUsers(
@@ -59,18 +63,32 @@ func reconcileProjectAppUsers(
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, AppUserReconcileResult{AppUserID: appUser.ID, Action: action})
+		results = append(results, AppUserReconcileResult{
+			AppUserID:        appUser.ID,
+			DisplayName:      appUser.DisplayName,
+			CentralCreatedAt: appUser.CreatedAt,
+			CentralUpdatedAt: appUser.UpdatedAt,
+			CentralDeletedAt: appUser.DeletedAt,
+			Action:           action,
+		})
 	}
 
 	missingIDs, err := markAbsentAppUsersMissing(tx, runID, projectID, snapshotIDs, syncedAt)
 	if err != nil {
 		return nil, err
 	}
-	for _, appUserID := range missingIDs {
+	for _, missing := range missingIDs {
 		results = append(results, AppUserReconcileResult{
-			AppUserID: appUserID,
-			Action:    AppUserActionMarkedMissing,
+			AppUserID:   missing.AppUserID,
+			DisplayName: missing.DisplayName,
+			Action:      AppUserActionMarkedMissing,
 		})
+	}
+
+	for _, result := range results {
+		if err := insertAppUserSyncRunDetail(tx, runID, projectID, result); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -208,13 +226,18 @@ func reconcileAppUser(
 	return action, nil
 }
 
+type missingAppUser struct {
+	AppUserID   int64
+	DisplayName string
+}
+
 func markAbsentAppUsersMissing(
 	tx *sql.Tx,
 	runID int64,
 	projectID int,
 	snapshotIDs []int64,
 	syncedAt time.Time,
-) ([]int64, error) {
+) ([]missingAppUser, error) {
 	query := fmt.Sprintf(`
 		UPDATE %s.app_users
 		SET
@@ -225,7 +248,7 @@ func markAbsentAppUsersMissing(
 		WHERE project_id = $1
 		  AND NOT (app_user_id = ANY($2))
 		  AND missing_from_central = FALSE
-		RETURNING app_user_id
+		RETURNING app_user_id, display_name
 	`, quoteIdentifier(appUserSchema))
 
 	rows, err := tx.Query(query, projectID, pq.Array(snapshotIDs), syncedAt, runID)
@@ -234,16 +257,57 @@ func markAbsentAppUsersMissing(
 	}
 	defer rows.Close()
 
-	var missingIDs []int64
+	var missingUsers []missingAppUser
 	for rows.Next() {
-		var appUserID int64
-		if err := rows.Scan(&appUserID); err != nil {
+		var missing missingAppUser
+		if err := rows.Scan(&missing.AppUserID, &missing.DisplayName); err != nil {
 			return nil, fmt.Errorf("failed to read missing App User for project %d: %w", projectID, err)
 		}
-		missingIDs = append(missingIDs, appUserID)
+		missingUsers = append(missingUsers, missing)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate missing App Users for project %d: %w", projectID, err)
 	}
-	return missingIDs, nil
+	return missingUsers, nil
+}
+
+func insertAppUserSyncRunDetail(
+	tx *sql.Tx,
+	runID int64,
+	projectID int,
+	result AppUserReconcileResult,
+) error {
+	rowsInserted := boolToCount(result.Action == AppUserActionInserted)
+	rowsUpdated := boolToCount(
+		result.Action == AppUserActionUpdated ||
+			result.Action == AppUserActionRestored ||
+			result.Action == AppUserActionMarkedMissing,
+	)
+	rowsSkipped := boolToCount(result.Action == AppUserActionSkipped)
+	objectName := result.DisplayName
+	if objectName == "" {
+		objectName = fmt.Sprintf("%d", result.AppUserID)
+	}
+
+	err := insertSyncRunDetail(tx, SyncRunDetailInsertParams{
+		RunID:            runID,
+		ProjectID:        projectID,
+		ObjectType:       "app_user",
+		ObjectName:       objectName,
+		SQLTableName:     "app_users",
+		AppUserID:        &result.AppUserID,
+		CentralCreatedAt: result.CentralCreatedAt,
+		CentralUpdatedAt: result.CentralUpdatedAt,
+		CentralDeletedAt: result.CentralDeletedAt,
+		SyncAction:       result.Action,
+		SyncStatus:       "success",
+		RowsFetched:      boolToCount(result.Action != AppUserActionMarkedMissing),
+		RowsInserted:     rowsInserted,
+		RowsUpdated:      rowsUpdated,
+		RowsSkipped:      rowsSkipped,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to record sync detail for App User %d: %w", result.AppUserID, err)
+	}
+	return nil
 }
