@@ -90,6 +90,10 @@ Do not commit `.env`. It contains credentials and Central tokens may also be cac
 Create `central_config.yaml` next to the binary:
 
 ```yaml
+attachment_storage:
+  backend: "local"
+  local_directory: "/var/lib/central-sync/attachments"
+
 projects:
   - project_id: 1
     project_name: "Example project"
@@ -108,6 +112,7 @@ projects:
         sync_mode: "upsert"
         approved_only: true
         approve_after_sync: false
+        sync_attachments: true
 
   - project_id: 2
     project_name: "Another project"
@@ -115,6 +120,13 @@ projects:
     datasets: []
     forms: []
 ```
+
+### Attachment Storage Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `backend` | When attachment sync is enabled | Attachment storage backend. Currently only `local` is supported. |
+| `local_directory` | When attachment sync uses `backend: local` | Root directory where submission attachments will be stored. Relative paths are resolved from the process working directory. |
 
 ### Project Fields
 
@@ -144,8 +156,33 @@ projects:
 | `sync_mode` | No | `append_only` by default. Can be `append_only` or `upsert`. |
 | `approved_only` | No | When `true`, only approved submissions are fetched. |
 | `approve_after_sync` | No | When `true`, successfully synchronized submissions are approved in Central after the PostgreSQL commit. |
+| `sync_attachments` | No | When `true`, submission attachments are synchronized using the configured `attachment_storage`. Defaults to `false`. |
 
 Table names must be unique inside the same project across dataset and form mappings.
+
+### Submission Attachment Synchronization
+
+When `sync_attachments: true`, attachments are synchronized after the submission rows have been committed to PostgreSQL and before `approve_after_sync` is applied. Files reported as missing by Central are counted but not downloaded.
+
+If a previously synchronized attachment is later reported with `exists: false`, its local file is retained to avoid automatic data loss. Its metadata is updated with `central_exists: false` and `missing_at`, and a warning is logged. If the file becomes available again, a successful synchronization clears `missing_at` and restores `central_exists: true`.
+
+The local backend writes files atomically below `local_directory` using this layout:
+
+```text
+project-{project_id}/form-{xml_form_id}/submission-{submission_uuid}/{filename}
+```
+
+Path components are escaped before use. Directories use mode `0750` and files use mode `0640`; the operating-system user running `central-sync` must be able to create and write below `local_directory`. Include this directory in backups together with the project database.
+
+`central-sync` calculates a SHA-256 checksum while downloading. An existing file with identical content is left unchanged. Different content replaces the file atomically and is reported as `replaced` in the logs. The checksum is stored in attachment metadata.
+
+Attachment downloads use a dedicated 10-minute HTTP timeout. Other Central API requests keep their 30-second timeout.
+
+Stored file metadata is upserted in `central_metadata.submission_attachments`. A download, storage, or metadata error marks the submission as failed, prevents automatic approval, and makes it eligible for the existing failed-submission retry flow.
+
+The same metadata row records the matching OData table, PostgreSQL table, source row, and flattened form field. This preserves the unique origin of an attachment referenced by either the root submission or a repeat row.
+
+Each form row in `central_metadata.sync_runs` records `attachments_expected`, `attachments_present`, `attachments_stored`, and `attachments_failed` totals for operational monitoring.
 
 ## PostgreSQL Setup
 
@@ -170,6 +207,12 @@ Historical metadata rows keep a NULL `sync_id` because their original process la
 
 The migration also validates the foreign key from `sync_runs_detail.run_id` to `sync_runs.run_id`. It stops without committing if historical orphan detail rows exist; resolve those rows before retrying the migration.
 
+For an upgrade from 0.3.x to 0.4.0, replace `your_central_user` in the migration with the PostgreSQL role used by `central-sync`, then run:
+
+```sh
+psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
+```
+
 The structure script creates:
 
 - `central_datasets`
@@ -177,6 +220,7 @@ The structure script creates:
 - `central_metadata`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
+- `central_metadata.submission_attachments`
 - metadata views used for incremental sync and retry tracking
 
 The privileges script is a template. Replace `your_central_user`, `your_central_user_password` and `your_database` before running it.
@@ -248,6 +292,8 @@ If a second run starts while the lock is held, it logs a `sync lock error` and e
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Reads the form OData service document and discovers root and repeat tables. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Reads OData metadata XML for form table schemas. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/{odataTableUrl}` | Fetches submission rows from OData tables, including `Submissions` and repeat tables. Uses `$top=1000`, `$count=true`, optional `$filter`, and follows `@odata.nextLink`. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments` | Lists the attachments declared for a submission when `sync_attachments` is enabled. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments/{filename}` | Downloads an individual submission attachment when `sync_attachments` is enabled. |
 | `PATCH` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}` | Sets `reviewState` to `approved` when `approve_after_sync` is enabled. |
 | `POST` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/comments` | Adds a sync comment after approval. |
 | `GET` | `/v1/projects/{projectId}/datasets/{datasetName}` | Reads dataset metadata and properties. |
@@ -371,7 +417,6 @@ Before opening a pull request, keep unrelated local files out of the commit. Loc
 The following limitations are known and will be added or improved in future versions:
 
 - PostgreSQL indexes are still minimal in this first public version. Additional indexes are planned for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables.
-- Submission attachments, such as photos, audio files, or other media files, are not synchronized yet.
 - Log file management is still minimal. `central-sync` writes to stdout and appends messages to `central-sync.log`, but it does not handle log rotation, retention, maximum size, or a configurable log path yet.
 
 ## License

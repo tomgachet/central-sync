@@ -258,6 +258,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 		RowsInserted: stats.RowsInserted,
 		RowsUpdated:  stats.RowsUpdated,
 		RowsSkipped:  stats.RowsSkipped,
+		RowsFailed:   stats.RowsFailed,
 		ErrorMessage: finalErrorMessage,
 	})
 	if err != nil {

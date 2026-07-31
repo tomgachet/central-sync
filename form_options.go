@@ -7,3 +7,7 @@ func isApprovedOnly(form FormMapping) bool {
 func shouldApproveAfterSync(form FormMapping) bool {
 	return form.ApproveAfterSync
 }
+
+func shouldSyncAttachments(form FormMapping) bool {
+	return form.SyncAttachments
+}

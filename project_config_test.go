@@ -19,7 +19,10 @@ func writeProjectConfigFile(t *testing.T, content string) string {
 }
 
 func TestLoadProjectConfigAcceptsValidConfig(t *testing.T) {
-	path := writeProjectConfigFile(t, `projects:
+	path := writeProjectConfigFile(t, `attachment_storage:
+  backend: local
+  local_directory: /var/lib/central-sync/attachments
+projects:
   - project_id: 1
     project_name: Demo
     database_name: demo_db
@@ -32,6 +35,7 @@ func TestLoadProjectConfigAcceptsValidConfig(t *testing.T) {
         table_name: household_submissions
         sync: true
         sync_mode: upsert
+        sync_attachments: true
 `)
 
 	config, err := loadProjectConfig(path)
@@ -40,6 +44,31 @@ func TestLoadProjectConfigAcceptsValidConfig(t *testing.T) {
 	}
 	if len(config.Projects) != 1 {
 		t.Fatalf("expected 1 project, got %d", len(config.Projects))
+	}
+	if config.AttachmentStorage.Backend != StorageBackendLocal {
+		t.Fatalf("expected local attachment backend, got %q", config.AttachmentStorage.Backend)
+	}
+	if !config.Projects[0].Forms[0].SyncAttachments {
+		t.Fatalf("expected form attachment synchronization to be enabled")
+	}
+}
+
+func TestLoadProjectConfigKeepsAttachmentsDisabledByDefault(t *testing.T) {
+	path := writeProjectConfigFile(t, `projects:
+  - project_id: 1
+    database_name: demo_db
+    forms:
+      - xml_form_id: household_form
+        table_name: household_submissions
+        sync: true
+`)
+
+	config, err := loadProjectConfig(path)
+	if err != nil {
+		t.Fatalf("loadProjectConfig returned error: %v", err)
+	}
+	if shouldSyncAttachments(config.Projects[0].Forms[0]) {
+		t.Fatalf("expected attachment synchronization to be disabled by default")
 	}
 }
 
@@ -152,6 +181,44 @@ func TestLoadProjectConfigRejectsInvalidConfig(t *testing.T) {
         table_name: central_records
 `,
 			expectedErr: `projects[0].forms[0].table_name "central_records" duplicates projects[0].datasets[0].table_name`,
+		},
+		{
+			name: "unsupported attachment backend",
+			config: `attachment_storage:
+  backend: ftp
+projects:
+  - project_id: 1
+    database_name: demo_db
+`,
+			expectedErr: `attachment_storage.backend must be empty or "local"`,
+		},
+		{
+			name: "missing attachment backend",
+			config: `attachment_storage:
+  local_directory: /var/lib/central-sync/attachments
+projects:
+  - project_id: 1
+    database_name: demo_db
+    forms:
+      - xml_form_id: household_form
+        table_name: household_submissions
+        sync_attachments: true
+`,
+			expectedErr: "attachment_storage.backend is required when sync_attachments is enabled",
+		},
+		{
+			name: "missing local attachment directory",
+			config: `attachment_storage:
+  backend: local
+projects:
+  - project_id: 1
+    database_name: demo_db
+    forms:
+      - xml_form_id: household_form
+        table_name: household_submissions
+        sync_attachments: true
+`,
+			expectedErr: "attachment_storage.local_directory is required when sync_attachments is enabled",
 		},
 	}
 

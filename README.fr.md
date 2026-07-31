@@ -88,6 +88,10 @@ Ne commitez pas `.env`. Il contient des identifiants, et des tokens Central peuv
 Créez `central_config.yaml` à côté du binaire :
 
 ```yaml
+attachment_storage:
+  backend: "local"
+  local_directory: "/var/lib/central-sync/attachments"
+
 projects:
   - project_id: 1
     project_name: "Example project"
@@ -106,6 +110,7 @@ projects:
         sync_mode: "upsert"
         approved_only: true
         approve_after_sync: false
+        sync_attachments: true
 
   - project_id: 2
     project_name: "Another project"
@@ -113,6 +118,13 @@ projects:
     datasets: []
     forms: []
 ```
+
+### Champs du stockage des pièces jointes
+
+| Champ | Requis | Description |
+| --- | --- | --- |
+| `backend` | Quand la synchronisation des pièces jointes est activée | Backend de stockage des pièces jointes. Seul `local` est actuellement pris en charge. |
+| `local_directory` | Quand la synchronisation utilise `backend: local` | Répertoire racine dans lequel les pièces jointes des soumissions seront stockées. Les chemins relatifs sont résolus depuis le répertoire de travail du processus. |
 
 ### Champs projet
 
@@ -142,8 +154,33 @@ projects:
 | `sync_mode` | Non | `append_only` par défaut. Peut valoir `append_only` ou `upsert`. |
 | `approved_only` | Non | Quand `true`, seules les soumissions approuvées sont récupérées. |
 | `approve_after_sync` | Non | Quand `true`, les soumissions synchronisées avec succès sont approuvées dans Central après le commit PostgreSQL. |
+| `sync_attachments` | Non | Quand `true`, les pièces jointes des soumissions sont synchronisées avec le stockage `attachment_storage` configuré. La valeur par défaut est `false`. |
 
 Les noms de tables doivent être uniques au sein d'un même projet, entre les mappings datasets et formulaires.
+
+### Synchronisation des pièces jointes des soumissions
+
+Quand `sync_attachments: true`, les pièces jointes sont synchronisées après le commit des lignes de la soumission dans PostgreSQL et avant l'application de `approve_after_sync`. Les fichiers signalés comme absents par Central sont comptabilisés, mais ne sont pas téléchargés.
+
+Si une pièce jointe déjà synchronisée est ensuite signalée avec `exists: false`, son fichier local est conservé afin d'éviter toute perte automatique de données. Ses métadonnées passent à `central_exists: false` avec une date `missing_at`, et un avertissement est journalisé. Si le fichier redevient disponible, une synchronisation réussie efface `missing_at` et rétablit `central_exists: true`.
+
+Le backend local écrit les fichiers de manière atomique sous `local_directory` avec cette arborescence :
+
+```text
+project-{project_id}/form-{xml_form_id}/submission-{submission_uuid}/{filename}
+```
+
+Les composants des chemins sont échappés avant utilisation. Les répertoires utilisent le mode `0750` et les fichiers le mode `0640` ; l'utilisateur système qui exécute `central-sync` doit pouvoir créer et écrire sous `local_directory`. Incluez ce répertoire dans les sauvegardes avec la base du projet.
+
+`central-sync` calcule un checksum SHA-256 pendant le téléchargement. Un fichier existant dont le contenu est identique reste inchangé. Un contenu différent remplace le fichier de manière atomique et apparaît avec l'action `replaced` dans les logs. Le checksum est conservé dans les métadonnées de la pièce jointe.
+
+Les téléchargements de pièces jointes utilisent un timeout HTTP dédié de 10 minutes. Les autres requêtes vers l'API Central conservent leur timeout de 30 secondes.
+
+Les métadonnées des fichiers stockés sont mises à jour par UPSERT dans `central_metadata.submission_attachments`. Une erreur de téléchargement, de stockage ou de métadonnées marque la soumission en échec, empêche son approbation automatique et la rend éligible au mécanisme existant de reprise des soumissions en échec.
+
+La même ligne de métadonnées conserve la table OData, la table PostgreSQL, la ligne source et le champ de formulaire aplati correspondants. L'origine unique d'une pièce jointe référencée dans la soumission racine ou une ligne repeat est ainsi conservée.
+
+Chaque ligne de formulaire dans `central_metadata.sync_runs` enregistre les totaux `attachments_expected`, `attachments_present`, `attachments_stored` et `attachments_failed` pour le suivi opérationnel.
 
 ## Configuration PostgreSQL
 
@@ -168,6 +205,12 @@ Les anciennes lignes de métadonnées conservent un `sync_id` NULL, car leur lan
 
 La migration valide également la clé étrangère de `sync_runs_detail.run_id` vers `sync_runs.run_id`. Elle s'arrête sans valider la transaction si des détails historiques orphelins existent ; corrigez ces lignes avant de relancer la migration.
 
+Pour une mise à jour de 0.3.x vers 0.4.0, remplacez `your_central_user` dans la migration par le rôle PostgreSQL utilisé par `central-sync`, puis exécutez :
+
+```sh
+psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
+```
+
 Le script de structure crée :
 
 - `central_datasets`
@@ -175,6 +218,7 @@ Le script de structure crée :
 - `central_metadata`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
+- `central_metadata.submission_attachments`
 - les vues de métadonnées utilisées pour la synchronisation incrémentale et le suivi des reprises
 
 Le script de privilèges est un template. Remplacez `your_central_user`, `your_central_user_password` et `your_database` avant de l'exécuter.
@@ -246,6 +290,8 @@ Si une seconde exécution démarre pendant que le verrou est détenu, elle journ
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Lit le document de service OData du formulaire et découvre les tables racine et repeat. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Lit les métadonnées OData XML pour les schémas des tables de formulaire. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/{odataTableUrl}` | Récupère les lignes de soumission depuis les tables OData, y compris `Submissions` et les tables repeat. Utilise `$top=1000`, `$count=true`, un `$filter` optionnel, et suit `@odata.nextLink`. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments` | Liste les pièces jointes déclarées pour une soumission quand `sync_attachments` est activé. |
+| `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/attachments/{filename}` | Télécharge une pièce jointe individuelle quand `sync_attachments` est activé. |
 | `PATCH` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}` | Définit `reviewState` à `approved` quand `approve_after_sync` est activé. |
 | `POST` | `/v1/projects/{projectId}/forms/{xmlFormId}/submissions/{instanceId}/comments` | Ajoute un commentaire de synchronisation après approbation. |
 | `GET` | `/v1/projects/{projectId}/datasets/{datasetName}` | Lit les métadonnées et propriétés du dataset. |
@@ -369,7 +415,6 @@ Avant d'ouvrir une pull request, gardez les fichiers locaux sans rapport hors du
 Les limites suivantes sont connues et seront intégrées ou améliorées dans des versions futures :
 
 - Les index PostgreSQL restent minimaux dans cette première version publique. Des index supplémentaires sont prévus pour les recherches dans les métadonnées, les curseurs de synchronisation incrémentale, les reprises de soumissions en échec et les tables métier synchronisées.
-- Les pièces jointes aux soumissions, par exemple les photos, sons ou autres fichiers média, ne sont pas encore synchronisées.
 - La gestion des fichiers de logs reste minimale. `central-sync` écrit dans stdout et ajoute les messages à `central-sync.log`, mais ne gère pas encore la rotation, la rétention, la taille maximale ou un chemin de log configurable.
 
 ## Licence

@@ -73,7 +73,7 @@ func main() {
 	logInfo("dataset sync finished")
 
 	logInfo("starting form sync")
-	syncAllForms(syncID, config.Projects, client)
+	syncAllForms(syncID, config.Projects, client, config.AttachmentStorage)
 	logInfo("form sync finished")
 
 	logInfo("central-sync finished sync_id=%s version=%s", syncID, version)

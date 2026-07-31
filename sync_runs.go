@@ -20,13 +20,18 @@ type SyncRunStartParams struct {
 }
 
 type SyncRunFinishParams struct {
-	RunID        int64
-	SyncStatus   string
-	RowsFetched  int
-	RowsInserted int
-	RowsUpdated  int
-	RowsSkipped  int
-	ErrorMessage *string
+	RunID               int64
+	SyncStatus          string
+	RowsFetched         int
+	RowsInserted        int
+	RowsUpdated         int
+	RowsSkipped         int
+	RowsFailed          int
+	AttachmentsExpected int
+	AttachmentsPresent  int
+	AttachmentsStored   int
+	AttachmentsFailed   int
+	ErrorMessage        *string
 }
 
 type SyncStats struct {
@@ -35,6 +40,10 @@ type SyncStats struct {
 	RowsUpdated           int
 	RowsSkipped           int
 	RowsFailed            int
+	AttachmentsExpected   int
+	AttachmentsPresent    int
+	AttachmentsStored     int
+	AttachmentsFailed     int
 	SyncOutSubmissionDate *time.Time
 	SyncOutUpdatedAt      *time.Time
 }
@@ -76,7 +85,7 @@ func startSyncRun(db DBExecutor, params SyncRunStartParams) (int64, error) {
 	return runID, nil
 }
 
-func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
+func finishSyncRun(db sqlExecutor, params SyncRunFinishParams) error {
 	query := fmt.Sprintf(`
 		UPDATE %s.sync_runs
 		SET
@@ -86,7 +95,12 @@ func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
 			rows_inserted = $5,
 			rows_updated = $6,
 			rows_skipped = $7,
-			error_message = $8
+			rows_failed = $8,
+			attachments_expected = $9,
+			attachments_present = $10,
+			attachments_stored = $11,
+			attachments_failed = $12,
+			error_message = $13
 		WHERE run_id = $1
 	`, quoteIdentifier(syncMetadataSchema))
 
@@ -99,6 +113,11 @@ func finishSyncRun(db DBExecutor, params SyncRunFinishParams) error {
 		params.RowsInserted,
 		params.RowsUpdated,
 		params.RowsSkipped,
+		params.RowsFailed,
+		params.AttachmentsExpected,
+		params.AttachmentsPresent,
+		params.AttachmentsStored,
+		params.AttachmentsFailed,
 		params.ErrorMessage,
 	)
 	if err != nil {

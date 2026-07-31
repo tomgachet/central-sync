@@ -1,0 +1,138 @@
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+type sqlExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+type SubmissionAttachmentMetadata struct {
+	RunID          int64
+	ProjectID      int
+	FormXMLID      string
+	SubmissionUUID string
+	Filename       string
+	ODataTableName string
+	SQLTableName   string
+	SourceRowUUID  string
+	FieldName      string
+	StorageBackend string
+	StoragePath    string
+	ContentType    string
+	SizeBytes      int64
+	ChecksumSHA256 string
+	ETag           string
+	SyncedAt       time.Time
+}
+
+func upsertSubmissionAttachmentMetadata(db sqlExecutor, metadata SubmissionAttachmentMetadata) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %s.submission_attachments (
+			project_id,
+			form_xml_id,
+			submission_uuid,
+			filename,
+			odata_table_name,
+			sql_table_name,
+			source_row_uuid,
+			field_name,
+			storage_backend,
+			storage_path,
+			content_type,
+			size_bytes,
+			checksum_sha256,
+			etag,
+			central_exists,
+			missing_at,
+			last_run_id,
+			synced_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, TRUE, NULL, $15, $16)
+		ON CONFLICT (project_id, form_xml_id, submission_uuid, filename)
+		DO UPDATE SET
+			odata_table_name = EXCLUDED.odata_table_name,
+			sql_table_name = EXCLUDED.sql_table_name,
+			source_row_uuid = EXCLUDED.source_row_uuid,
+			field_name = EXCLUDED.field_name,
+			storage_backend = EXCLUDED.storage_backend,
+			storage_path = EXCLUDED.storage_path,
+			content_type = EXCLUDED.content_type,
+			size_bytes = EXCLUDED.size_bytes,
+			checksum_sha256 = EXCLUDED.checksum_sha256,
+			etag = EXCLUDED.etag,
+			central_exists = TRUE,
+			missing_at = NULL,
+			last_run_id = EXCLUDED.last_run_id,
+			synced_at = EXCLUDED.synced_at
+	`, quoteIdentifier(syncMetadataSchema))
+
+	syncedAt := metadata.SyncedAt
+	if syncedAt.IsZero() {
+		syncedAt = time.Now().UTC()
+	}
+
+	_, err := db.Exec(
+		query,
+		metadata.ProjectID,
+		metadata.FormXMLID,
+		metadata.SubmissionUUID,
+		metadata.Filename,
+		nullableAttachmentSourceValue(metadata.ODataTableName),
+		nullableAttachmentSourceValue(metadata.SQLTableName),
+		nullableAttachmentSourceValue(metadata.SourceRowUUID),
+		nullableAttachmentSourceValue(metadata.FieldName),
+		metadata.StorageBackend,
+		metadata.StoragePath,
+		metadata.ContentType,
+		metadata.SizeBytes,
+		metadata.ChecksumSHA256,
+		metadata.ETag,
+		metadata.RunID,
+		syncedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert metadata for attachment %q on submission %s: %w", metadata.Filename, metadata.SubmissionUUID, err)
+	}
+
+	return nil
+}
+
+func nullableAttachmentSourceValue(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func markSubmissionAttachmentMissing(
+	db sqlExecutor,
+	runID int64,
+	projectID int,
+	formXMLID string,
+	submissionUUID string,
+	filename string,
+) error {
+	now := time.Now().UTC()
+	query := fmt.Sprintf(`
+		UPDATE %s.submission_attachments
+		SET
+			central_exists = FALSE,
+			missing_at = $5,
+			last_run_id = $6,
+			synced_at = $5
+		WHERE project_id = $1
+		  AND form_xml_id = $2
+		  AND submission_uuid = $3
+		  AND filename = $4
+	`, quoteIdentifier(syncMetadataSchema))
+
+	_, err := db.Exec(query, projectID, formXMLID, submissionUUID, filename, now, runID)
+	if err != nil {
+		return fmt.Errorf("failed to mark attachment %q as missing for submission %s: %w", filename, submissionUUID, err)
+	}
+	return nil
+}

@@ -10,10 +10,16 @@ import (
 )
 
 type CentralClient struct {
-	BaseURL    string
-	Token      string
-	HTTPClient *http.Client
+	BaseURL              string
+	Token                string
+	HTTPClient           *http.Client
+	AttachmentHTTPClient *http.Client
 }
+
+const (
+	centralRequestTimeout    = 30 * time.Second
+	attachmentRequestTimeout = 10 * time.Minute
+)
 
 type centralHTTPResponse struct {
 	StatusCode int
@@ -32,12 +38,17 @@ func newCentralClient() (*CentralClient, error) {
 		return nil, err
 	}
 
+	httpClient := &http.Client{
+		Timeout: centralRequestTimeout,
+	}
+	attachmentHTTPClient := *httpClient
+	attachmentHTTPClient.Timeout = attachmentRequestTimeout
+
 	return &CentralClient{
-		BaseURL: baseURL,
-		Token:   token,
-		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		BaseURL:              baseURL,
+		Token:                token,
+		HTTPClient:           httpClient,
+		AttachmentHTTPClient: &attachmentHTTPClient,
 	}, nil
 }
 
@@ -46,7 +57,27 @@ func (c *CentralClient) Get(url string) (*http.Response, error) {
 }
 
 func (c *CentralClient) GetWithAccept(url string, accept string) (*http.Response, error) {
-	resp, err := c.doGetWithAccept(url, c.Token, accept)
+	return c.getWithAcceptUsingClient(url, accept, c.HTTPClient)
+}
+
+func (c *CentralClient) GetAttachment(url string) (*http.Response, error) {
+	httpClient := c.AttachmentHTTPClient
+	if httpClient == nil {
+		httpClient = c.HTTPClient
+	}
+	return c.getWithAcceptUsingClient(url, "*/*", httpClient)
+}
+
+func (c *CentralClient) getWithAcceptUsingClient(
+	url string,
+	accept string,
+	httpClient *http.Client,
+) (*http.Response, error) {
+	if httpClient == nil {
+		return nil, fmt.Errorf("Central HTTP client is not configured")
+	}
+
+	resp, err := c.doGetWithAccept(url, c.Token, accept, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +93,15 @@ func (c *CentralClient) GetWithAccept(url string, accept string) (*http.Response
 		return nil, fmt.Errorf("failed to refresh Central token after 401: %w", err)
 	}
 
-	return c.doGetWithAccept(url, c.Token, accept)
+	return c.doGetWithAccept(url, c.Token, accept, httpClient)
 }
 
-func (c *CentralClient) doGetWithAccept(url string, token string, accept string) (*http.Response, error) {
+func (c *CentralClient) doGetWithAccept(
+	url string,
+	token string,
+	accept string,
+	httpClient *http.Client,
+) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GET request: %w", err)
@@ -78,7 +114,7 @@ func (c *CentralClient) doGetWithAccept(url string, token string, accept string)
 	}
 	req.Header.Set("Accept", accept)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute GET request: %w", err)
 	}
