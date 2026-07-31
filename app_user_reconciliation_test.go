@@ -9,7 +9,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-const reconcileAppUserQueryPattern = `(?s)WITH existing AS .*INSERT INTO "central_users"\.app_users .*ON CONFLICT \(project_id, app_user_id\).*SELECT CASE`
+const classifyAppUserQueryPattern = `(?s)SELECT.*missing_from_central.*AS changed.*FROM "central_users"\.app_users.*FOR UPDATE`
+const upsertAppUserQueryPattern = `(?s)INSERT INTO "central_users"\.app_users .*ON CONFLICT \(project_id, app_user_id\).*DO UPDATE SET`
 const markMissingAppUsersQueryPattern = `(?s)UPDATE "central_users"\.app_users.*missing_from_central = TRUE.*RETURNING app_user_id`
 const insertAppUserDetailQueryPattern = `(?s)INSERT INTO "central_metadata"\.sync_runs_detail .*app_user_id.*VALUES`
 
@@ -21,7 +22,7 @@ func TestReconcileProjectAppUsersCommitsCompleteSnapshot(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(reconcileAppUserQueryPattern).
+	mock.ExpectQuery(classifyAppUserQueryPattern).
 		WithArgs(
 			7,
 			int64(115),
@@ -34,14 +35,10 @@ func TestReconcileProjectAppUsersCommitsCompleteSnapshot(t *testing.T) {
 			nil,
 			[]byte(`{"region":"North"}`),
 			false,
-			sqlmock.AnyArg(),
-			int64(42),
-			AppUserActionInserted,
-			AppUserActionRestored,
-			AppUserActionUpdated,
-			AppUserActionSkipped,
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"action"}).AddRow(AppUserActionInserted))
+		WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}))
+	mock.ExpectExec(upsertAppUserQueryPattern).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(markMissingAppUsersQueryPattern).
 		WithArgs(7, sqlmock.AnyArg(), sqlmock.AnyArg(), int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}).
@@ -80,8 +77,10 @@ func TestReconcileProjectAppUsersRestoresExistingUser(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(reconcileAppUserQueryPattern).
-		WillReturnRows(sqlmock.NewRows([]string{"action"}).AddRow(AppUserActionRestored))
+	mock.ExpectQuery(classifyAppUserQueryPattern).
+		WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}).AddRow(true, false))
+	mock.ExpectExec(upsertAppUserQueryPattern).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(markMissingAppUsersQueryPattern).
 		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}))
 	expectAppUserDetailInsert(mock)
@@ -97,6 +96,57 @@ func TestReconcileProjectAppUsersRestoresExistingUser(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Action != AppUserActionRestored {
 		t.Fatalf("unexpected reconciliation results: %+v", results)
+	}
+}
+
+func TestClassifyAppUserActionDistinguishesUpdatedAndSkipped(t *testing.T) {
+	tests := []struct {
+		name     string
+		changed  bool
+		expected string
+	}{
+		{name: "updated", changed: true, expected: AppUserActionUpdated},
+		{name: "skipped", changed: false, expected: AppUserActionSkipped},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("failed to create SQL mock: %v", err)
+			}
+			defer db.Close()
+
+			mock.ExpectBegin()
+			mock.ExpectQuery(classifyAppUserQueryPattern).
+				WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}).
+					AddRow(false, tt.changed))
+			mock.ExpectRollback()
+
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatalf("failed to begin transaction: %v", err)
+			}
+			action, err := classifyAppUserAction(
+				tx,
+				7,
+				CentralAppUser{ID: 115, DisplayName: "Collector", Type: "field_key"},
+				nil,
+				[]byte("{}"),
+			)
+			if err != nil {
+				t.Fatalf("classifyAppUserAction returned error: %v", err)
+			}
+			if action != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, action)
+			}
+			if err := tx.Rollback(); err != nil {
+				t.Fatalf("failed to roll back test transaction: %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet SQL expectations: %v", err)
+			}
+		})
 	}
 }
 
@@ -141,7 +191,9 @@ func TestReconcileProjectAppUsersRollsBackOnUpsertFailure(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(reconcileAppUserQueryPattern).
+	mock.ExpectQuery(classifyAppUserQueryPattern).
+		WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}))
+	mock.ExpectExec(upsertAppUserQueryPattern).
 		WillReturnError(errors.New("database unavailable"))
 	mock.ExpectRollback()
 
@@ -166,8 +218,10 @@ func TestReconcileProjectAppUsersRejectsDuplicateSnapshotIDs(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(reconcileAppUserQueryPattern).
-		WillReturnRows(sqlmock.NewRows([]string{"action"}).AddRow(AppUserActionInserted))
+	mock.ExpectQuery(classifyAppUserQueryPattern).
+		WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}))
+	mock.ExpectExec(upsertAppUserQueryPattern).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectRollback()
 
 	appUser := CentralAppUser{ID: 115, DisplayName: "Collector", Type: "field_key"}

@@ -120,87 +120,58 @@ func reconcileAppUser(
 		properties = []byte("{}")
 	}
 
-	query := fmt.Sprintf(`
-		WITH existing AS (
-			SELECT
-				display_name,
-				actor_type,
-				central_created_at,
-				central_updated_at,
-				central_deleted_at,
-				last_used_at,
-				created_by,
-				properties,
-				revoked,
-				missing_from_central
-			FROM %s.app_users
-			WHERE project_id = $1
-			  AND app_user_id = $2
-			FOR UPDATE
-		),
-		upserted AS (
-			INSERT INTO %s.app_users (
-				project_id,
-				app_user_id,
-				display_name,
-				actor_type,
-				central_created_at,
-				central_updated_at,
-				central_deleted_at,
-				last_used_at,
-				created_by,
-				properties,
-				revoked,
-				missing_from_central,
-				missing_since,
-				first_synced_at,
-				last_synced_at,
-				last_run_id
-			)
-			VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
-				$11, FALSE, NULL, $12, $12, $13
-			)
-			ON CONFLICT (project_id, app_user_id)
-			DO UPDATE SET
-				display_name = EXCLUDED.display_name,
-				actor_type = EXCLUDED.actor_type,
-				central_created_at = EXCLUDED.central_created_at,
-				central_updated_at = EXCLUDED.central_updated_at,
-				central_deleted_at = EXCLUDED.central_deleted_at,
-				last_used_at = EXCLUDED.last_used_at,
-				created_by = EXCLUDED.created_by,
-				properties = EXCLUDED.properties,
-				revoked = EXCLUDED.revoked,
-				missing_from_central = FALSE,
-				missing_since = NULL,
-				last_synced_at = EXCLUDED.last_synced_at,
-				last_run_id = EXCLUDED.last_run_id
-			RETURNING app_user_id
-		)
-		SELECT CASE
-			WHEN NOT EXISTS (SELECT 1 FROM existing) THEN $14
-			WHEN (SELECT missing_from_central FROM existing) THEN $15
-			WHEN EXISTS (
-				SELECT 1
-				FROM existing
-				WHERE display_name IS DISTINCT FROM $3
-				   OR actor_type IS DISTINCT FROM $4
-				   OR central_created_at IS DISTINCT FROM $5
-				   OR central_updated_at IS DISTINCT FROM $6
-				   OR central_deleted_at IS DISTINCT FROM $7
-				   OR last_used_at IS DISTINCT FROM $8
-				   OR created_by IS DISTINCT FROM $9::jsonb
-				   OR properties IS DISTINCT FROM $10::jsonb
-				   OR revoked IS DISTINCT FROM $11
-			) THEN $16
-			ELSE $17
-		END
-		FROM upserted
-	`, quoteIdentifier(appUserSchema), quoteIdentifier(appUserSchema))
+	action, err := classifyAppUserAction(
+		tx,
+		projectID,
+		appUser,
+		createdBy,
+		properties,
+	)
+	if err != nil {
+		return "", err
+	}
 
-	var action string
-	err = tx.QueryRow(
+	query := fmt.Sprintf(`
+		INSERT INTO %s.app_users (
+			project_id,
+			app_user_id,
+			display_name,
+			actor_type,
+			central_created_at,
+			central_updated_at,
+			central_deleted_at,
+			last_used_at,
+			created_by,
+			properties,
+			revoked,
+			missing_from_central,
+			missing_since,
+			first_synced_at,
+			last_synced_at,
+			last_run_id
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
+			$11, FALSE, NULL, $12, $12, $13
+		)
+		ON CONFLICT (project_id, app_user_id)
+		DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			actor_type = EXCLUDED.actor_type,
+			central_created_at = EXCLUDED.central_created_at,
+			central_updated_at = EXCLUDED.central_updated_at,
+			central_deleted_at = EXCLUDED.central_deleted_at,
+			last_used_at = EXCLUDED.last_used_at,
+			created_by = EXCLUDED.created_by,
+			properties = EXCLUDED.properties,
+			revoked = EXCLUDED.revoked,
+			missing_from_central = FALSE,
+			missing_since = NULL,
+			last_synced_at = EXCLUDED.last_synced_at,
+			last_run_id = EXCLUDED.last_run_id
+	`, quoteIdentifier(appUserSchema))
+
+	_, err = tx.Exec(
 		query,
 		projectID,
 		appUser.ID,
@@ -215,15 +186,67 @@ func reconcileAppUser(
 		appUser.Revoked,
 		syncedAt,
 		runID,
-		AppUserActionInserted,
-		AppUserActionRestored,
-		AppUserActionUpdated,
-		AppUserActionSkipped,
-	).Scan(&action)
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to reconcile App User %d: %w", appUser.ID, err)
 	}
 	return action, nil
+}
+
+func classifyAppUserAction(
+	tx *sql.Tx,
+	projectID int,
+	appUser CentralAppUser,
+	createdBy interface{},
+	properties []byte,
+) (string, error) {
+	query := fmt.Sprintf(`
+		SELECT
+			missing_from_central,
+			display_name IS DISTINCT FROM $3
+				OR actor_type IS DISTINCT FROM $4
+				OR central_created_at IS DISTINCT FROM $5
+				OR central_updated_at IS DISTINCT FROM $6
+				OR central_deleted_at IS DISTINCT FROM $7
+				OR last_used_at IS DISTINCT FROM $8
+				OR created_by IS DISTINCT FROM $9::jsonb
+				OR properties IS DISTINCT FROM $10::jsonb
+				OR revoked IS DISTINCT FROM $11 AS changed
+		FROM %s.app_users
+		WHERE project_id = $1
+		  AND app_user_id = $2
+		FOR UPDATE
+	`, quoteIdentifier(appUserSchema))
+
+	var missing bool
+	var changed bool
+	err := tx.QueryRow(
+		query,
+		projectID,
+		appUser.ID,
+		appUser.DisplayName,
+		appUser.Type,
+		appUser.CreatedAt,
+		appUser.UpdatedAt,
+		appUser.DeletedAt,
+		appUser.LastUsed,
+		createdBy,
+		properties,
+		appUser.Revoked,
+	).Scan(&missing, &changed)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return AppUserActionInserted, nil
+		}
+		return "", fmt.Errorf("failed to inspect App User %d: %w", appUser.ID, err)
+	}
+	if missing {
+		return AppUserActionRestored, nil
+	}
+	if changed {
+		return AppUserActionUpdated, nil
+	}
+	return AppUserActionSkipped, nil
 }
 
 type missingAppUser struct {
