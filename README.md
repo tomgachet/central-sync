@@ -10,6 +10,7 @@ French documentation: [README.fr.md](README.fr.md)
 
 - Synchronizes ODK Central datasets, also called entity lists.
 - Synchronizes form submissions, including repeat groups.
+- Optionally synchronizes project App Users without storing their authentication tokens.
 - Creates and evolves PostgreSQL tables when Central schemas change.
 - Stores geometry values as GeoJSON.
 - Tracks sync runs and row-level details in `central_metadata`.
@@ -98,6 +99,7 @@ projects:
   - project_id: 1
     project_name: "Example project"
     database_name: "central_project_1"
+    sync_app_users: true
     datasets:
       - name: "species"
         table_name: "species"
@@ -135,6 +137,7 @@ projects:
 | `project_id` | Yes | Numeric ODK Central project ID. Must be greater than `0`. |
 | `project_name` | No | Informational name only. |
 | `database_name` | Yes | Target PostgreSQL database for this project. |
+| `sync_app_users` | No | When `true`, synchronizes the project's App Users into `central_users.app_users`. Defaults to `false`. |
 | `datasets` | No | Dataset mappings to synchronize. |
 | `forms` | No | Form mappings to synchronize. |
 
@@ -184,6 +187,18 @@ The same metadata row records the matching OData table, PostgreSQL table, source
 
 Each form row in `central_metadata.sync_runs` records `attachments_expected`, `attachments_present`, `attachments_stored`, and `attachments_failed` totals for operational monitoring.
 
+### App User Synchronization
+
+Set `sync_app_users: true` on a project to synchronize its complete ODK Central App User snapshot into `central_users.app_users`. The table uses `(project_id, app_user_id)` as its primary key, so projects sharing one PostgreSQL database remain isolated.
+
+The synchronization stores administrative metadata such as the display name, Central timestamps, last-used timestamp, creator metadata, actor properties, and revocation state. ODK Central may return an App User authentication token, but `central-sync` only checks whether that field is present to derive `revoked`. The token value is immediately discarded: it is never represented in the persisted model, written to PostgreSQL, or included in logs and errors.
+
+The App Users endpoint is a complete, non-paginated snapshot. Every successful run upserts the returned users and retains users that disappeared from Central with `missing_from_central: true`. `missing_since` records the first observed absence and is preserved across later runs. If the user reappears, both missing fields are cleared.
+
+Missing-user detection runs only after the complete response has been fetched and decoded successfully. An HTTP, reading, decoding, or database error never turns existing rows into missing users. The entire reconciliation and its `central_metadata.sync_runs_detail` records are committed in one PostgreSQL transaction.
+
+Each detail row uses `object_type = 'app_user'`, stores the numeric `app_user_id`, and records one of `inserted`, `updated`, `skipped`, `restored`, or `marked_missing`. Form and role assignments are not synchronized in this first implementation.
+
 ## PostgreSQL Setup
 
 Each configured project points to one PostgreSQL database. That database must already exist and contain the required schemas and metadata tables.
@@ -213,14 +228,22 @@ For an upgrade from 0.3.x to 0.4.0, replace `your_central_user` in the migration
 psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
 ```
 
+For an upgrade from 0.4.x to 0.5.0, replace `your_central_user` in the migration with the PostgreSQL role used by `central-sync`, then run:
+
+```sh
+psql -d your_database -f sql_migrations/v0.5.0_add_app_users.sql
+```
+
 The structure script creates:
 
 - `central_datasets`
 - `central_submissions`
 - `central_metadata`
+- `central_users`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
 - `central_metadata.submission_attachments`
+- `central_users.app_users`
 - metadata views used for incremental sync and retry tracking
 
 The privileges script is a template. Replace `your_central_user`, `your_central_user_password` and `your_database` before running it.
@@ -266,11 +289,12 @@ The program runs in this order:
 
 1. Load `.env`.
 2. Load and validate `central_config.yaml`.
-3. Acquire a PostgreSQL advisory lock for each configured project database that has active dataset or form mappings.
+3. Acquire a PostgreSQL advisory lock for each configured project database that has active dataset, form, or App User synchronization.
 4. Authenticate to ODK Central.
 5. Synchronize configured datasets.
-6. Synchronize configured forms.
-7. Write logs to stdout and `central-sync.log`.
+6. Synchronize configured App Users.
+7. Synchronize configured forms.
+8. Write logs to stdout and `central-sync.log`.
 
 ### Concurrent Runs
 
@@ -288,6 +312,7 @@ If a second run starts while the lock is held, it logs a `sync lock error` and e
 | --- | --- | --- |
 | `POST` | `/v1/sessions` | Creates or refreshes the Central session token. |
 | `GET` | `/v1/projects/{projectId}` | Checks that a configured project exists. |
+| `GET` | `/v1/projects/{projectId}/app-users` | Fetches the complete App User snapshot with `X-Extended-Metadata: true` when `sync_app_users` is enabled. |
 | `GET` | `/v1/projects/{projectId}/forms` | Lists project forms and validates configured `xml_form_id` values. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Reads the form OData service document and discovers root and repeat tables. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Reads OData metadata XML for form table schemas. |
@@ -326,6 +351,10 @@ On a first run, no previous successful cursor exists, so the incremental date fi
 ### Datasets
 
 Datasets are synchronized into the `central_datasets` schema. The program creates or updates target tables based on the Central entity schema and tracks processed rows in `central_metadata.sync_runs_detail`.
+
+### App Users
+
+App Users are fully reconciled into `central_users.app_users` on every enabled run. Unlike dataset and form synchronization, this flow is not incremental because Central returns the complete project snapshot. See [App User Synchronization](#app-user-synchronization) for security and missing-user behavior.
 
 ### Forms
 
@@ -371,7 +400,7 @@ Treat these cases as recoverable partial failures and inspect `central_metadata.
 
 Each process launch generates one UUID named `sync_id`. The same value is stored on every run created during that launch, including work performed across different project databases. Startup, completion, dataset/form lifecycle and error log messages include it so the complete execution can be correlated without repeating it on every intermediate message.
 
-Each dataset or form sync also receives its own database-generated `run_id` and creates a record in `central_metadata.sync_runs`. A `run_id` identifies one dataset or form run, while a `sync_id` identifies the complete `central-sync` launch. Row-level details are written to `central_metadata.sync_runs_detail` and linked to their launch through `run_id`.
+Each dataset, form, or App User sync also receives its own database-generated `run_id` and creates a record in `central_metadata.sync_runs`. A `run_id` identifies one object-level run, while a `sync_id` identifies the complete `central-sync` launch. Row-level details are written to `central_metadata.sync_runs_detail` and linked to their launch through `run_id`.
 
 For example, all metadata for one launch can be inspected with:
 
@@ -395,7 +424,8 @@ Useful metadata objects:
 | Object | Purpose |
 | --- | --- |
 | `central_metadata.sync_runs` | One row per high-level sync run. |
-| `central_metadata.sync_runs_detail` | Detailed row-level or submission-level sync events. |
+| `central_metadata.sync_runs_detail` | Detailed entity, submission, or App User sync events. |
+| `central_users.app_users` | Current and missing App User administrative metadata, without authentication tokens. |
 | `central_metadata.last_successful_submissions_sync` | Incremental cursor for form submissions. |
 | `central_metadata.last_successful_datasets_sync` | Incremental cursor for datasets. |
 | `central_metadata.last_failed_submissions` | Latest failed submission events used for retry tracking. |
@@ -417,6 +447,7 @@ Before opening a pull request, keep unrelated local files out of the commit. Loc
 The following limitations are known and will be added or improved in future versions:
 
 - PostgreSQL indexes are still minimal in this first public version. Additional indexes are planned for metadata lookups, incremental sync cursors, failed-submission retries, and synchronized business tables.
+- App User form and role assignments are not synchronized.
 - Log file management is still minimal. `central-sync` writes to stdout and appends messages to `central-sync.log`, but it does not handle log rotation, retention, maximum size, or a configurable log path yet.
 
 ## License

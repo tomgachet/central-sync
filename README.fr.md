@@ -8,6 +8,7 @@ Il est conçu pour des synchronisations planifiées ou manuelles dans lesquelles
 
 - Synchronise les datasets ODK Central, aussi appelés listes d'entités.
 - Synchronise les soumissions de formulaires, y compris les groupes répétés.
+- Synchronise en option les App Users des projets sans stocker leurs tokens d'authentification.
 - Crée et fait évoluer les tables PostgreSQL lorsque les schémas Central changent.
 - Stocke les valeurs géométriques en GeoJSON.
 - Trace les exécutions de synchronisation et les détails ligne par ligne dans `central_metadata`.
@@ -96,6 +97,7 @@ projects:
   - project_id: 1
     project_name: "Example project"
     database_name: "central_project_1"
+    sync_app_users: true
     datasets:
       - name: "species"
         table_name: "species"
@@ -133,6 +135,7 @@ projects:
 | `project_id` | Oui | ID numérique du projet ODK Central. Doit être supérieur à `0`. |
 | `project_name` | Non | Nom informatif uniquement. |
 | `database_name` | Oui | Base PostgreSQL cible pour ce projet. |
+| `sync_app_users` | Non | Quand `true`, synchronise les App Users du projet dans `central_users.app_users`. La valeur par défaut est `false`. |
 | `datasets` | Non | Mappings des datasets à synchroniser. |
 | `forms` | Non | Mappings des formulaires à synchroniser. |
 
@@ -182,6 +185,18 @@ La même ligne de métadonnées conserve la table OData, la table PostgreSQL, la
 
 Chaque ligne de formulaire dans `central_metadata.sync_runs` enregistre les totaux `attachments_expected`, `attachments_present`, `attachments_stored` et `attachments_failed` pour le suivi opérationnel.
 
+### Synchronisation des App Users
+
+Définissez `sync_app_users: true` sur un projet pour synchroniser le snapshot complet de ses App Users ODK Central dans `central_users.app_users`. La table utilise `(project_id, app_user_id)` comme clé primaire, ce qui isole les projets qui partagent une même base PostgreSQL.
+
+La synchronisation conserve les métadonnées administratives : nom d'affichage, dates Central, dernière utilisation, métadonnées du créateur, propriétés de l'acteur et état de révocation. ODK Central peut retourner un token d'authentification App User, mais `central-sync` vérifie uniquement si ce champ est présent afin de calculer `revoked`. La valeur du token est immédiatement abandonnée : elle n'est jamais représentée dans le modèle persistant, écrite dans PostgreSQL, ni incluse dans les logs ou les erreurs.
+
+L'endpoint App Users retourne un snapshot complet non paginé. Chaque exécution réussie met à jour les utilisateurs retournés et conserve ceux qui ont disparu de Central avec `missing_from_central: true`. `missing_since` enregistre la première absence observée et reste inchangé lors des exécutions suivantes. Si l'utilisateur réapparaît, les deux champs d'absence sont effacés.
+
+La détection des utilisateurs absents ne s'exécute qu'après la récupération et le décodage réussis de la réponse complète. Une erreur HTTP, de lecture, de décodage ou de base de données ne transforme jamais les utilisateurs existants en utilisateurs absents. Toute la réconciliation et ses lignes `central_metadata.sync_runs_detail` sont validées dans une seule transaction PostgreSQL.
+
+Chaque ligne de détail utilise `object_type = 'app_user'`, conserve l'identifiant numérique `app_user_id` et enregistre une action parmi `inserted`, `updated`, `skipped`, `restored` ou `marked_missing`. Les affectations aux formulaires et aux rôles ne sont pas synchronisées dans cette première implémentation.
+
 ## Configuration PostgreSQL
 
 Chaque projet configuré pointe vers une base PostgreSQL. Cette base doit déjà exister et contenir les schémas et tables de métadonnées requis.
@@ -211,14 +226,22 @@ Pour une mise à jour de 0.3.x vers 0.4.0, remplacez `your_central_user` dans la
 psql -d your_database -f sql_migrations/v0.4.0_add_submission_attachments.sql
 ```
 
+Pour une mise à jour de 0.4.x vers 0.5.0, remplacez `your_central_user` dans la migration par le rôle PostgreSQL utilisé par `central-sync`, puis exécutez :
+
+```sh
+psql -d your_database -f sql_migrations/v0.5.0_add_app_users.sql
+```
+
 Le script de structure crée :
 
 - `central_datasets`
 - `central_submissions`
 - `central_metadata`
+- `central_users`
 - `central_metadata.sync_runs`
 - `central_metadata.sync_runs_detail`
 - `central_metadata.submission_attachments`
+- `central_users.app_users`
 - les vues de métadonnées utilisées pour la synchronisation incrémentale et le suivi des reprises
 
 Le script de privilèges est un template. Remplacez `your_central_user`, `your_central_user_password` et `your_database` avant de l'exécuter.
@@ -264,11 +287,12 @@ Le programme s'exécute dans cet ordre :
 
 1. Charge `.env`.
 2. Charge et valide `central_config.yaml`.
-3. Acquiert un verrou PostgreSQL advisory pour chaque base projet configurée qui contient des mappings dataset ou formulaire actifs.
+3. Acquiert un verrou PostgreSQL advisory pour chaque base projet configurée qui contient une synchronisation active de dataset, formulaire ou App Users.
 4. S'authentifie auprès d'ODK Central.
 5. Synchronise les datasets configurés.
-6. Synchronise les formulaires configurés.
-7. Écrit les logs dans stdout et `central-sync.log`.
+6. Synchronise les App Users configurés.
+7. Synchronise les formulaires configurés.
+8. Écrit les logs dans stdout et `central-sync.log`.
 
 ### Exécutions concurrentes
 
@@ -286,6 +310,7 @@ Si une seconde exécution démarre pendant que le verrou est détenu, elle journ
 | --- | --- | --- |
 | `POST` | `/v1/sessions` | Crée ou rafraîchit le token de session Central. |
 | `GET` | `/v1/projects/{projectId}` | Vérifie qu'un projet configuré existe. |
+| `GET` | `/v1/projects/{projectId}/app-users` | Récupère le snapshot complet des App Users avec `X-Extended-Metadata: true` quand `sync_app_users` est activé. |
 | `GET` | `/v1/projects/{projectId}/forms` | Liste les formulaires du projet et valide les valeurs `xml_form_id` configurées. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc` | Lit le document de service OData du formulaire et découvre les tables racine et repeat. |
 | `GET` | `/v1/projects/{projectId}/forms/{xmlFormId}.svc/$metadata` | Lit les métadonnées OData XML pour les schémas des tables de formulaire. |
@@ -324,6 +349,10 @@ Lors d'une première exécution, aucun curseur de synchronisation réussie n'exi
 ### Datasets
 
 Les datasets sont synchronisés dans le schéma `central_datasets`. Le programme crée ou met à jour les tables cibles à partir du schéma d'entités Central et trace les lignes traitées dans `central_metadata.sync_runs_detail`.
+
+### App Users
+
+Les App Users sont entièrement réconciliés dans `central_users.app_users` à chaque exécution activée. Contrairement aux datasets et aux formulaires, ce flux n'est pas incrémental puisque Central retourne le snapshot complet du projet. Consultez [Synchronisation des App Users](#synchronisation-des-app-users) pour les garanties de sécurité et le traitement des utilisateurs absents.
 
 ### Formulaires
 
@@ -369,7 +398,7 @@ Traitez ces cas comme des échecs partiels récupérables et inspectez `central_
 
 Chaque lancement du processus génère un UUID nommé `sync_id`. La même valeur est stockée sur toutes les exécutions créées pendant ce lancement, y compris lorsque plusieurs bases de projets sont traitées. Les logs de démarrage, de fin, de cycle de vie des datasets/formulaires et d'erreur l'incluent afin de corréler l'exécution complète sans le répéter dans chaque message intermédiaire.
 
-Chaque synchronisation de dataset ou de formulaire reçoit également son propre `run_id`, généré par la base, et crée un enregistrement dans `central_metadata.sync_runs`. Un `run_id` identifie la synchronisation d'un dataset ou d'un formulaire, tandis qu'un `sync_id` identifie le lancement complet de `central-sync`. Les détails ligne par ligne sont écrits dans `central_metadata.sync_runs_detail` et reliés à leur lancement par `run_id`.
+Chaque synchronisation de dataset, de formulaire ou d'App Users reçoit également son propre `run_id`, généré par la base, et crée un enregistrement dans `central_metadata.sync_runs`. Un `run_id` identifie une exécution au niveau d'un objet, tandis qu'un `sync_id` identifie le lancement complet de `central-sync`. Les détails ligne par ligne sont écrits dans `central_metadata.sync_runs_detail` et reliés à leur lancement par `run_id`.
 
 Par exemple, toutes les métadonnées d'un lancement peuvent être consultées avec :
 
@@ -393,7 +422,8 @@ Objets de métadonnées utiles :
 | Objet | Utilisation |
 | --- | --- |
 | `central_metadata.sync_runs` | Une ligne par exécution de synchronisation de haut niveau. |
-| `central_metadata.sync_runs_detail` | Événements détaillés au niveau ligne ou soumission. |
+| `central_metadata.sync_runs_detail` | Événements détaillés au niveau entité, soumission ou App User. |
+| `central_users.app_users` | Métadonnées administratives actuelles et absentes des App Users, sans tokens d'authentification. |
 | `central_metadata.last_successful_submissions_sync` | Curseur incrémental pour les soumissions de formulaires. |
 | `central_metadata.last_successful_datasets_sync` | Curseur incrémental pour les datasets. |
 | `central_metadata.last_failed_submissions` | Derniers événements de soumission en échec utilisés pour le suivi des reprises. |
@@ -415,6 +445,7 @@ Avant d'ouvrir une pull request, gardez les fichiers locaux sans rapport hors du
 Les limites suivantes sont connues et seront intégrées ou améliorées dans des versions futures :
 
 - Les index PostgreSQL restent minimaux dans cette première version publique. Des index supplémentaires sont prévus pour les recherches dans les métadonnées, les curseurs de synchronisation incrémentale, les reprises de soumissions en échec et les tables métier synchronisées.
+- Les affectations des App Users aux formulaires et aux rôles ne sont pas synchronisées.
 - La gestion des fichiers de logs reste minimale. `central-sync` écrit dans stdout et ajoute les messages à `central-sync.log`, mais ne gère pas encore la rotation, la rétention, la taille maximale ou un chemin de log configurable.
 
 ## Licence
