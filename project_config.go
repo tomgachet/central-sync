@@ -185,6 +185,15 @@ func getFormsToSync(project ProjectMapping) []FormMapping {
 	return formsToSync
 }
 
+func hasAppUsersToSync(projects []ProjectMapping) bool {
+	for _, project := range projects {
+		if project.SyncAppUsers {
+			return true
+		}
+	}
+	return false
+}
+
 func getFormSyncMode(form FormMapping) string {
 	switch form.SyncMode {
 	case SyncModeAppendOnly, SyncModeUpsert:

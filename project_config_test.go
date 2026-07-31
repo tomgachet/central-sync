@@ -72,6 +72,15 @@ func TestLoadProjectConfigKeepsAppUsersDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestHasAppUsersToSync(t *testing.T) {
+	if hasAppUsersToSync([]ProjectMapping{{ProjectID: 1}, {ProjectID: 2}}) {
+		t.Fatalf("expected App User synchronization to remain disabled")
+	}
+	if !hasAppUsersToSync([]ProjectMapping{{ProjectID: 1}, {ProjectID: 2, SyncAppUsers: true}}) {
+		t.Fatalf("expected App User synchronization to be detected")
+	}
+}
+
 func TestLoadProjectConfigKeepsAttachmentsDisabledByDefault(t *testing.T) {
 	path := writeProjectConfigFile(t, `projects:
   - project_id: 1

@@ -72,9 +72,11 @@ func main() {
 	syncAllProjects(syncID, config.Projects, client)
 	logInfo("dataset sync finished")
 
-	logInfo("starting App User sync")
-	syncAllAppUsers(syncID, config.Projects, client)
-	logInfo("App User sync finished")
+	if hasAppUsersToSync(config.Projects) {
+		logInfo("starting App User sync")
+		syncAllAppUsers(syncID, config.Projects, client)
+		logInfo("App User sync finished")
+	}
 
 	logInfo("starting form sync")
 	syncAllForms(syncID, config.Projects, client, config.AttachmentStorage)
