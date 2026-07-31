@@ -195,7 +195,7 @@ L'endpoint App Users retourne un snapshot complet non paginé. Chaque exécution
 
 La détection des utilisateurs absents ne s'exécute qu'après la récupération et le décodage réussis de la réponse complète. Une erreur HTTP, de lecture, de décodage ou de base de données ne transforme jamais les utilisateurs existants en utilisateurs absents. Toute la réconciliation et ses lignes `central_metadata.sync_runs_detail` sont validées dans une seule transaction PostgreSQL.
 
-Chaque ligne de détail utilise `object_type = 'app_user'`, conserve l'identifiant numérique `app_user_id` et enregistre une action parmi `inserted`, `updated`, `skipped`, `restored` ou `marked_missing`. Les affectations aux formulaires et aux rôles ne sont pas synchronisées dans cette première implémentation.
+Chaque ligne de détail utilise `object_type = 'app_user'`, conserve l'identifiant numérique `app_user_id` et enregistre une action parmi `inserted`, `updated`, `restored` ou `marked_missing`. Les utilisateurs inchangés sont comptés dans `sync_runs.rows_skipped` et dans le log de fin sans créer de lignes de détail répétitives. Les affectations aux formulaires et aux rôles ne sont pas synchronisées dans cette première implémentation.
 
 ## Configuration PostgreSQL
 

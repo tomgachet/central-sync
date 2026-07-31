@@ -150,6 +150,39 @@ func TestClassifyAppUserActionDistinguishesUpdatedAndSkipped(t *testing.T) {
 	}
 }
 
+func TestReconcileProjectAppUsersDoesNotWriteDetailForSkippedUser(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create SQL mock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(classifyAppUserQueryPattern).
+		WillReturnRows(sqlmock.NewRows([]string{"missing_from_central", "changed"}).
+			AddRow(false, false))
+	mock.ExpectExec(upsertAppUserQueryPattern).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(markMissingAppUsersQueryPattern).
+		WillReturnRows(sqlmock.NewRows([]string{"app_user_id", "display_name"}))
+	mock.ExpectCommit()
+
+	results, err := reconcileProjectAppUsers(db, 42, 7, []CentralAppUser{{
+		ID:          115,
+		DisplayName: "Collector",
+		Type:        "field_key",
+	}})
+	if err != nil {
+		t.Fatalf("reconcileProjectAppUsers returned error: %v", err)
+	}
+	if len(results) != 1 || results[0].Action != AppUserActionSkipped {
+		t.Fatalf("unexpected reconciliation results: %+v", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected sync detail for skipped App User: %v", err)
+	}
+}
+
 func TestReconcileProjectAppUsersMarksAllExistingUsersMissingForEmptySnapshot(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

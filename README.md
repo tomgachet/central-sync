@@ -197,7 +197,7 @@ The App Users endpoint is a complete, non-paginated snapshot. Every successful r
 
 Missing-user detection runs only after the complete response has been fetched and decoded successfully. An HTTP, reading, decoding, or database error never turns existing rows into missing users. The entire reconciliation and its `central_metadata.sync_runs_detail` records are committed in one PostgreSQL transaction.
 
-Each detail row uses `object_type = 'app_user'`, stores the numeric `app_user_id`, and records one of `inserted`, `updated`, `skipped`, `restored`, or `marked_missing`. Form and role assignments are not synchronized in this first implementation.
+Each detail row uses `object_type = 'app_user'`, stores the numeric `app_user_id`, and records one of `inserted`, `updated`, `restored`, or `marked_missing`. Unchanged users are counted in `sync_runs.rows_skipped` and the completion log without creating repetitive detail rows. Form and role assignments are not synchronized in this first implementation.
 
 ## PostgreSQL Setup
 

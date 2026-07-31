@@ -300,13 +300,16 @@ func insertAppUserSyncRunDetail(
 	projectID int,
 	result AppUserReconcileResult,
 ) error {
+	if result.Action == AppUserActionSkipped {
+		return nil
+	}
+
 	rowsInserted := boolToCount(result.Action == AppUserActionInserted)
 	rowsUpdated := boolToCount(
 		result.Action == AppUserActionUpdated ||
 			result.Action == AppUserActionRestored ||
 			result.Action == AppUserActionMarkedMissing,
 	)
-	rowsSkipped := boolToCount(result.Action == AppUserActionSkipped)
 	objectName := result.DisplayName
 	if objectName == "" {
 		objectName = fmt.Sprintf("%d", result.AppUserID)
@@ -327,7 +330,6 @@ func insertAppUserSyncRunDetail(
 		RowsFetched:      boolToCount(result.Action != AppUserActionMarkedMissing),
 		RowsInserted:     rowsInserted,
 		RowsUpdated:      rowsUpdated,
-		RowsSkipped:      rowsSkipped,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to record sync detail for App User %d: %w", result.AppUserID, err)
