@@ -57,7 +57,11 @@ func (c *CentralClient) Get(url string) (*http.Response, error) {
 }
 
 func (c *CentralClient) GetWithAccept(url string, accept string) (*http.Response, error) {
-	return c.getWithAcceptUsingClient(url, accept, c.HTTPClient)
+	return c.getWithAcceptUsingClient(url, accept, false, c.HTTPClient)
+}
+
+func (c *CentralClient) GetWithExtendedMetadata(url string) (*http.Response, error) {
+	return c.getWithAcceptUsingClient(url, "application/json", true, c.HTTPClient)
 }
 
 func (c *CentralClient) GetAttachment(url string) (*http.Response, error) {
@@ -65,19 +69,20 @@ func (c *CentralClient) GetAttachment(url string) (*http.Response, error) {
 	if httpClient == nil {
 		httpClient = c.HTTPClient
 	}
-	return c.getWithAcceptUsingClient(url, "*/*", httpClient)
+	return c.getWithAcceptUsingClient(url, "*/*", false, httpClient)
 }
 
 func (c *CentralClient) getWithAcceptUsingClient(
 	url string,
 	accept string,
+	extendedMetadata bool,
 	httpClient *http.Client,
 ) (*http.Response, error) {
 	if httpClient == nil {
 		return nil, fmt.Errorf("Central HTTP client is not configured")
 	}
 
-	resp, err := c.doGetWithAccept(url, c.Token, accept, httpClient)
+	resp, err := c.doGetWithAccept(url, c.Token, accept, extendedMetadata, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -93,13 +98,14 @@ func (c *CentralClient) getWithAcceptUsingClient(
 		return nil, fmt.Errorf("failed to refresh Central token after 401: %w", err)
 	}
 
-	return c.doGetWithAccept(url, c.Token, accept, httpClient)
+	return c.doGetWithAccept(url, c.Token, accept, extendedMetadata, httpClient)
 }
 
 func (c *CentralClient) doGetWithAccept(
 	url string,
 	token string,
 	accept string,
+	extendedMetadata bool,
 	httpClient *http.Client,
 ) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
@@ -113,6 +119,9 @@ func (c *CentralClient) doGetWithAccept(
 		accept = "application/json"
 	}
 	req.Header.Set("Accept", accept)
+	if extendedMetadata {
+		req.Header.Set("X-Extended-Metadata", "true")
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

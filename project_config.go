@@ -39,6 +39,7 @@ type ProjectMapping struct {
 	ProjectID    int              `yaml:"project_id"`
 	ProjectName  string           `yaml:"project_name"`
 	DatabaseName string           `yaml:"database_name"`
+	SyncAppUsers bool             `yaml:"sync_app_users"`
 	Datasets     []DatasetMapping `yaml:"datasets"`
 	Forms        []FormMapping    `yaml:"forms"`
 }

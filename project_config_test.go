@@ -26,6 +26,7 @@ projects:
   - project_id: 1
     project_name: Demo
     database_name: demo_db
+    sync_app_users: true
     datasets:
       - name: people
         table_name: central_people
@@ -48,8 +49,26 @@ projects:
 	if config.AttachmentStorage.Backend != StorageBackendLocal {
 		t.Fatalf("expected local attachment backend, got %q", config.AttachmentStorage.Backend)
 	}
+	if !config.Projects[0].SyncAppUsers {
+		t.Fatalf("expected App User synchronization to be enabled")
+	}
 	if !config.Projects[0].Forms[0].SyncAttachments {
 		t.Fatalf("expected form attachment synchronization to be enabled")
+	}
+}
+
+func TestLoadProjectConfigKeepsAppUsersDisabledByDefault(t *testing.T) {
+	path := writeProjectConfigFile(t, `projects:
+  - project_id: 1
+    database_name: demo_db
+`)
+
+	config, err := loadProjectConfig(path)
+	if err != nil {
+		t.Fatalf("loadProjectConfig returned error: %v", err)
+	}
+	if config.Projects[0].SyncAppUsers {
+		t.Fatalf("expected App User synchronization to be disabled by default")
 	}
 }
 
