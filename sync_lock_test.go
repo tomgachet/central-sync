@@ -40,10 +40,11 @@ func TestActiveProjectDatabaseNamesReturnsSortedUniqueActiveDatabases(t *testing
 		{DatabaseName: "unused_db", Datasets: []DatasetMapping{{Name: "sites", TableName: "sites", Sync: false}}},
 		{DatabaseName: "a_db", Forms: []FormMapping{{XMLFormID: "survey", TableName: "survey", Sync: true}}},
 		{DatabaseName: "z_db", Forms: []FormMapping{{XMLFormID: "other", TableName: "other", Sync: true}}},
+		{DatabaseName: "users_db", SyncAppUsers: true},
 	}
 
 	got := activeProjectDatabaseNames(projects)
-	want := []string{"a_db", "z_db"}
+	want := []string{"a_db", "users_db", "z_db"}
 
 	if len(got) != len(want) {
 		t.Fatalf("expected %d names, got %d: %v", len(want), len(got), got)

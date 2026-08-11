@@ -1,6 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS central_datasets;
 CREATE SCHEMA IF NOT EXISTS central_submissions;
 CREATE SCHEMA IF NOT EXISTS central_metadata;
+CREATE SCHEMA IF NOT EXISTS central_users;
 
 CREATE TABLE IF NOT EXISTS central_metadata.sync_runs (
     run_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS central_metadata.sync_runs_detail (
     sql_table_name VARCHAR(150) NOT NULL,
     submission_uuid UUID,
     entity_uuid UUID,
+    app_user_id BIGINT,
     central_submission_date TIMESTAMPTZ,
     central_created_at TIMESTAMPTZ,
     central_updated_at TIMESTAMPTZ,
@@ -81,14 +83,43 @@ CREATE TABLE IF NOT EXISTS central_metadata.submission_attachments (
     PRIMARY KEY (project_id, form_xml_id, submission_uuid, filename)
 );
 
+CREATE TABLE IF NOT EXISTS central_users.app_users (
+    project_id INT NOT NULL,
+    app_user_id BIGINT NOT NULL,
+    display_name TEXT NOT NULL,
+    actor_type VARCHAR(30) NOT NULL,
+    central_created_at TIMESTAMPTZ,
+    central_updated_at TIMESTAMPTZ,
+    central_deleted_at TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    created_by JSONB,
+    properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+    revoked BOOLEAN NOT NULL,
+    missing_from_central BOOLEAN NOT NULL DEFAULT FALSE,
+    missing_since TIMESTAMPTZ,
+    first_synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_run_id BIGINT NOT NULL
+        CONSTRAINT app_users_last_run_id_fkey
+        REFERENCES central_metadata.sync_runs (run_id),
+    PRIMARY KEY (project_id, app_user_id)
+);
+
 CREATE INDEX IF NOT EXISTS sync_runs_sync_id_idx
     ON central_metadata.sync_runs (sync_id);
 
 CREATE INDEX IF NOT EXISTS sync_runs_detail_run_id_idx
     ON central_metadata.sync_runs_detail (run_id);
 
+CREATE INDEX IF NOT EXISTS sync_runs_detail_app_user_idx
+    ON central_metadata.sync_runs_detail (project_id, app_user_id)
+    WHERE app_user_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS submission_attachments_last_run_id_idx
     ON central_metadata.submission_attachments (last_run_id);
+
+CREATE INDEX IF NOT EXISTS app_users_last_run_id_idx
+    ON central_users.app_users (last_run_id);
 
 CREATE OR REPLACE VIEW central_metadata.last_successful_submissions_sync AS
 SELECT

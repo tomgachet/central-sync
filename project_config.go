@@ -39,6 +39,7 @@ type ProjectMapping struct {
 	ProjectID    int              `yaml:"project_id"`
 	ProjectName  string           `yaml:"project_name"`
 	DatabaseName string           `yaml:"database_name"`
+	SyncAppUsers bool             `yaml:"sync_app_users"`
 	Datasets     []DatasetMapping `yaml:"datasets"`
 	Forms        []FormMapping    `yaml:"forms"`
 }
@@ -182,6 +183,15 @@ func getFormsToSync(project ProjectMapping) []FormMapping {
 	}
 
 	return formsToSync
+}
+
+func hasAppUsersToSync(projects []ProjectMapping) bool {
+	for _, project := range projects {
+		if project.SyncAppUsers {
+			return true
+		}
+	}
+	return false
 }
 
 func getFormSyncMode(form FormMapping) string {
