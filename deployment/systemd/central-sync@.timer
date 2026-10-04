@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly ODK Central synchronization (%i)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+Unit=central-sync@%i.service
+
+[Install]
+WantedBy=timers.target

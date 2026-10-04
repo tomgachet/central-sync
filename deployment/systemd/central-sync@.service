@@ -1,0 +1,24 @@
+[Unit]
+Description=ODK Central synchronization (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=central-sync
+Group=central-sync
+WorkingDirectory=/var/lib/central-sync/%i
+ExecStart=/usr/local/bin/central-sync
+TimeoutStartSec=infinity
+UMask=0027
+StateDirectory=central-sync/%i
+StateDirectoryMode=0750
+LogsDirectory=central-sync/%i
+LogsDirectoryMode=0750
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=central-sync-%i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

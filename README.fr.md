@@ -22,13 +22,15 @@ Il est conçu pour des synchronisations planifiées ou manuelles dans lesquelles
 - Un compte ODK Central ayant accès aux projets, datasets et formulaires à synchroniser.
 - Une base PostgreSQL pour chaque projet ODK Central configuré.
 - Un rôle PostgreSQL ayant accès aux schémas de synchronisation.
-- Les fichiers suivants à côté du binaire :
+- Les fichiers suivants dans le répertoire de travail du processus :
   - `.env`
   - `central_config.yaml`
 
 Pour le développement, Go est requis. Le projet cible actuellement Go `1.26.x` en CI.
 
 ## Installation
+
+Pour un VPS Debian 13, consultez le [guide de déploiement systemd](deployment/README.fr.md) : installation du binaire partagé, configuration et logs par projet, rotation des logs et lancement toutes les heures.
 
 Téléchargez l'archive `.tar.gz` correspondant à votre plateforme depuis la page des releases, puis extrayez le binaire `central-sync` dans un répertoire contenant `.env` et `central_config.yaml`.
 
@@ -54,7 +56,7 @@ go build -o central-sync
 
 ## Fichier d'environnement
 
-Créez `.env` à côté du binaire :
+Créez `.env` dans le répertoire de travail du processus :
 
 ```env
 ODK_CENTRAL_URL=https://central.example.org
@@ -86,7 +88,11 @@ Ne commitez pas `.env`. Il contient des identifiants, et des tokens Central peuv
 
 ## Configuration des projets
 
-Créez `central_config.yaml` à côté du binaire :
+Le programme accepte plusieurs projets dans un même fichier, comme dans l'exemple ci-dessous. Un lancement traite alors tous les projets configurés et écrit leurs messages dans un fichier de log commun.
+
+Pour le [déploiement systemd sur Debian 13](deployment/README.fr.md), utilisez un seul projet par fichier de configuration et une instance de service par projet. Chaque instance dispose ainsi de son propre calendrier et de ses propres logs. La clé YAML reste `projects`, même si la liste ne contient qu'un projet. Le binaire accepte toujours plusieurs projets ; l'installeur ne contrôle pas le nombre de projets d'une configuration fournie.
+
+Créez `central_config.yaml` dans le répertoire de travail du processus :
 
 ```yaml
 attachment_storage:
