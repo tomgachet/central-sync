@@ -24,13 +24,15 @@ French documentation: [README.fr.md](README.fr.md)
 - An ODK Central account with access to the projects, datasets and forms to synchronize.
 - A PostgreSQL database for each configured ODK Central project.
 - A PostgreSQL role with access to the sync schemas.
-- The following files next to the binary:
+- The following files in the process working directory:
   - `.env`
   - `central_config.yaml`
 
 For development, Go is required. The project currently targets Go `1.26.x` in CI.
 
 ## Installation
+
+For a Debian 13 VPS, see the [systemd deployment guide](deployment/README.md) for shared binary installation, per-project configuration and logs, log rotation, and hourly scheduling.
 
 Download the `.tar.gz` archive for your platform from the release page, then extract the `central-sync` binary into a directory containing `.env` and `central_config.yaml`.
 
@@ -56,7 +58,7 @@ go build -o central-sync
 
 ## Environment File
 
-Create `.env` next to the binary:
+Create `.env` in the process working directory:
 
 ```env
 ODK_CENTRAL_URL=https://central.example.org
@@ -88,7 +90,11 @@ Do not commit `.env`. It contains credentials and Central tokens may also be cac
 
 ## Project Configuration
 
-Create `central_config.yaml` next to the binary:
+The application supports multiple projects in one file, as shown below. A single run processes all configured projects and writes their messages to a shared log file.
+
+For the [Debian 13 systemd deployment](deployment/README.md), use one project per configuration file and one service instance per project. Each instance then has its own schedule and logs. The YAML key remains `projects`, even when the list contains only one project. The binary still accepts multiple projects; the installer does not check the number of projects in a supplied configuration.
+
+Create `central_config.yaml` in the process working directory:
 
 ```yaml
 attachment_storage:

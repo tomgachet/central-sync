@@ -1,0 +1,10 @@
+/var/log/central-sync/*/central-sync.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    su central-sync central-sync
+    create 0640 central-sync central-sync
+}

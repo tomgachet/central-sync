@@ -1,0 +1,19 @@
+# Keep exactly one ODK Central project per systemd instance.
+attachment_storage:
+  backend: local
+  local_directory: attachments
+
+projects:
+  - project_id: 1
+    project_name: Example project
+    database_name: central_project_1
+    sync_app_users: false
+    datasets: []
+    forms:
+      - xml_form_id: example_form
+        table_name: example_form
+        sync: true
+        sync_mode: upsert
+        approved_only: false
+        approve_after_sync: false
+        sync_attachments: false
