@@ -67,10 +67,10 @@ sys.exit(subprocess.call(['/usr/bin/install', *args]))
         path.write_text(content)
         path.chmod(0o755)
 
-    def run_installer(self, *args, success=True, original=False):
+    def run_installer(self, *args, success=True, original=False, answers=None):
         script = DEPLOYMENT / "install.sh" if original else self.script
         result = subprocess.run(["bash", str(script), *args], env=self.env,
-                                text=True, capture_output=True)
+                                text=True, capture_output=True, input=answers)
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -122,6 +122,69 @@ sys.exit(subprocess.call(['/usr/bin/install', *args]))
                            success=False)
         self.assertFalse((self.host / "usr/local/bin/central-sync").exists())
         self.assertEqual((state / ".env").read_text(), "do not overwrite\n")
+
+    def wizard_answers(self):
+        return "\n".join([
+            "https://central.example.org", "sync@example.org", "sec$#=ret\\x",
+            "", "bad-port", "5432", "", "pg$#=secret", "invalid", "require", "",
+            "0", "2", "Étude d'observation: test", "no",
+            "yes", "Observateurs d'été: terrain", "INVALID", "observateurs", "no",
+            "yes", "soler_ide_taxon", "observateurs", "soler_ide_taxon",
+            "invalid-mode", "append_only", "no", "",
+        ])
+
+    def test_interactive_configuration_and_secrets(self):
+        result = self.run_installer("--interactive", "--project", "soler-ide",
+                                    "--binary", str(self.binary),
+                                    answers=self.wizard_answers())
+        config = self.host / "etc/central-sync/soler-ide"
+        env = (config / ".env").read_text()
+        yaml = (config / "central_config.yaml").read_text()
+        self.assertIn("ODK_CENTRAL_USER_PASSWORD=sec$#=ret\\x\n", env)
+        self.assertIn("PG_SSLMODE=require\n", env)
+        self.assertIn("PG_PORT=5432\n", env)
+        self.assertIn("PG_PASSWORD=pg$#=secret\n", env)
+        self.assertIn("project_id: 2", yaml)
+        self.assertIn("database_name: 'central_soler_ide'", yaml)
+        self.assertIn("project_name: 'Étude d''observation: test'", yaml)
+        self.assertIn("name: 'Observateurs d''été: terrain'", yaml)
+        self.assertIn("table_name: soler_ide_taxon", yaml)
+        self.assertIn("sync_mode: append_only", yaml)
+        self.assertNotIn("sec$#=ret", result.stdout + result.stderr)
+        self.assertNotIn("pg$#=secret", result.stdout + result.stderr)
+        self.assertEqual((config / ".env").stat().st_mode & 0o777, 0o640)
+        self.assertEqual((config / "central_config.yaml").stat().st_mode & 0o777, 0o640)
+        before = {p.name: p.read_bytes() for p in config.iterdir()}
+        self.run_installer("--interactive", "--project", "soler-ide", success=False)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in config.iterdir()})
+
+    def test_interactive_can_defer_all_sync_mappings(self):
+        answers = "\n".join([
+            "https://central.example.org", "sync@example.org", "central-secret",
+            "", "", "", "pg-secret", "", "", "2", "",
+            "no", "", "", "",
+        ])
+        result = self.run_installer("--interactive", "--project", "soler-ide",
+                                    "--binary", str(self.binary), answers=answers)
+        config = self.host / "etc/central-sync/soler-ide/central_config.yaml"
+        self.assertIn("datasets: []", config.read_text())
+        self.assertIn("forms: []", config.read_text())
+        self.assertIn("sync_app_users: false", config.read_text())
+        self.assertIn("before starting the service", result.stdout)
+        self.assertNotIn("start", self.trace.read_text())
+        self.assertNotIn("enable", self.trace.read_text())
+
+    def test_interactive_cancel_conflict_and_dry_run(self):
+        self.run_installer("--interactive", "--project", "projet-1",
+                           "--binary", str(self.binary), answers="https://central.example.org\n",
+                           success=False)
+        self.assertFalse((self.host / "usr/local/bin/central-sync").exists())
+        self.assertFalse((self.host / "etc/central-sync/projet-1").exists())
+        self.run_installer("--interactive", "--project", "projet-1",
+                           "--env-file", str(self.root / "missing"), success=False)
+        self.run_installer("--interactive", "--binary", str(self.binary),
+                           "--dry-run", answers="soler-ide\n")
+        self.assertFalse((self.host / "etc/central-sync/soler-ide").exists())
 
     def test_active_timer_blocks_binary_replacement(self):
         self.install_project()

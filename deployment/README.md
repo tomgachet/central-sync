@@ -5,15 +5,26 @@ instance has its own configuration, session cache, attachments and logs. All
 instances run as the `central-sync` system user with a dedicated PostgreSQL role.
 They share a Unix account: this separates operations, not security between projects.
 
-Run the commands below as root on the VPS from the repository root. They install
-the files; they do not automatically connect to a VPS. Scheduled runs only need
+Run the commands below as root on the VPS from the extracted deployment bundle
+or the repository root. They install the files; they do not automatically connect to a VPS. Scheduled runs only need
 the installed binary and configuration, not Go or a repository checkout.
 
 ## CLI installation
 
-The installer replaces manual steps 1 and 2 below. From the repository, prepare
-the selected release binary (or build this branch), then install dependencies
-as root:
+The `central-sync-deployment-linux-amd64.tar.gz` archive (or `arm64`) contains
+the compiled binary, installer and supporting files. It is available starting
+with the next release after v1.0.0. No source download or compilation is required.
+
+Download this archive and `SHA256SUMS` from the same release into an empty
+directory, then verify and extract the archive (amd64 example):
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf central-sync-deployment-linux-amd64.tar.gz
+cd central-sync-deployment-linux-amd64
+```
+
+From this directory, run as root:
 
 ```sh
 apt-get update
@@ -21,6 +32,40 @@ apt-get install -y ca-certificates logrotate
 bash deployment/install.sh --project projet-1 --binary ./central-sync --dry-run
 bash deployment/install.sh --project projet-1 --binary ./central-sync
 ```
+
+The same installer can also be used from the repository with a separately
+prepared binary.
+
+### Interactive configuration for a new instance
+
+To enter the configuration during installation:
+
+```sh
+bash deployment/install.sh --interactive --binary ./central-sync
+```
+
+The wizard asks for the local instance name (or accepts `--project`), Central URL,
+dedicated account, PostgreSQL connection settings, database name and Central
+project ID. You can enable App User synchronization and add multiple datasets
+and forms with their destination tables. Dataset names and form XML IDs must
+match Central exactly. Each form can use `append_only` or `upsert`.
+You can answer no to both steps and configure them later: the YAML will contain
+empty `datasets: []` and `forms: []` lists. Fill them in manually before starting
+synchronization.
+
+Passwords are hidden during input. Generated files are readable only by root and
+the `central-sync` group (mode `0640`). The current `.env` reader does not support
+leading/trailing whitespace or quotes; the wizard rejects these values rather
+than silently changing them. Forms include all approval states; automatic
+approval and attachment downloads are disabled. Edit the YAML afterwards to
+change these options.
+
+This mode is for new instances and refuses to replace existing configuration.
+It cannot be combined with `--env-file` or `--config-file`. With `--dry-run`, only
+the instance name is requested; credentials are not collected and no files are
+written. Cancelling the questionnaire installs nothing. Prepare the PostgreSQL
+database and role separately; the wizard does not test Central or PostgreSQL
+connections.
 
 To supply your initial configuration instead of the examples:
 
