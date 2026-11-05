@@ -36,6 +36,8 @@ For a Debian 13 VPS, see the [systemd deployment guide](deployment/README.md) fo
 
 Download the `.tar.gz` archive for your platform from the release page, then extract the `central-sync` binary into a directory containing `.env` and `central_config.yaml`.
 
+For Debian 13 VPS deployments, use the `central-sync-deployment-linux-<arch>.tar.gz` bundle described in [the installation guide](deployment/README.md). It includes the binary, installer and supporting files (available after v1.0.0).
+
 ```sh
 tar -xzf central-sync-linux-amd64.tar.gz
 ```

@@ -7,16 +7,28 @@ de session, ses pièces jointes et ses logs. Elle utilise le compte système
 Unix : la séparation par projet est une séparation d'exploitation, pas une
 isolation de sécurité entre projets.
 
-Les commandes ci-dessous sont exécutées en root sur le VPS depuis la racine du
-dépôt. Elles installent les fichiers ; aucune connexion au VPS n'est effectuée
+Les commandes ci-dessous sont exécutées en root sur le VPS depuis le dossier
+extrait de l'archive de déploiement ou la racine du dépôt. Elles installent les fichiers ; aucune connexion au VPS n'est effectuée
 automatiquement. Go et le dépôt ne sont pas nécessaires pour les exécutions :
 seuls le binaire installé et les configurations sont utilisés.
 
 ## Installation avec le CLI
 
-L'installeur remplace les étapes manuelles 1 et 2 ci-dessous. Depuis le dépôt,
-préparez le binaire de la release choisie (ou construisez cette branche) puis
-installez les dépendances en root :
+L'archive `central-sync-deployment-linux-amd64.tar.gz` (ou `arm64`) contient
+le binaire compilé, l'installeur et ses fichiers associés. Elle est disponible
+à partir de la prochaine release après v1.0.0. Aucun téléchargement des sources
+ni compilation n'est nécessaire.
+
+Téléchargez cette archive et `SHA256SUMS` depuis la même release dans un dossier
+vide, puis vérifiez et extrayez l'archive (exemple amd64) :
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf central-sync-deployment-linux-amd64.tar.gz
+cd central-sync-deployment-linux-amd64
+```
+
+Depuis ce dossier, exécutez en root :
 
 ```sh
 apt-get update
@@ -24,6 +36,42 @@ apt-get install -y ca-certificates logrotate
 bash deployment/install.sh --project projet-1 --binary ./central-sync --dry-run
 bash deployment/install.sh --project projet-1 --binary ./central-sync
 ```
+
+Le même installeur peut aussi être utilisé depuis le dépôt avec un binaire
+préparé séparément.
+
+### Configuration interactive d'une nouvelle instance
+
+Pour renseigner la configuration directement pendant l'installation :
+
+```sh
+bash deployment/install.sh --interactive --binary ./central-sync
+```
+
+Le questionnaire demande le nom local de l'instance (ou accepte `--project`),
+l'URL Central, le compte dédié, les paramètres PostgreSQL, le nom de la base et
+l'ID du projet Central. Il permet d'activer la synchronisation des App Users et
+d'ajouter plusieurs datasets et formulaires avec leurs tables de destination.
+Les noms des datasets et les IDs XML des formulaires doivent correspondre
+exactement à Central. Chaque formulaire peut utiliser `append_only` ou `upsert`.
+Vous pouvez répondre non aux deux étapes pour les configurer plus tard : les
+listes `datasets: []` et `forms: []` restent vides dans le YAML. Complétez-les
+manuellement avant de lancer la synchronisation.
+
+Les mots de passe sont masqués à la saisie. Les fichiers générés sont accessibles
+à root et au groupe `central-sync` uniquement (mode `0640`). Le lecteur `.env`
+actuel ne prend pas en charge les espaces ou guillemets en début/fin de valeur ;
+le questionnaire refuse ces valeurs plutôt que de les modifier silencieusement.
+Les formulaires incluent tous les états d'approbation ; l'approbation automatique
+et le téléchargement des pièces jointes sont désactivés. Modifiez le YAML ensuite
+si vous souhaitez changer ces options.
+
+Ce mode est réservé aux nouvelles instances et refuse de remplacer une
+configuration existante. Il ne se combine pas avec `--env-file` ou `--config-file`.
+Avec `--dry-run`, seul le nom de l'instance est demandé, sans demander les
+identifiants ni écrire de fichier. Une annulation pendant le questionnaire
+n'installe rien. La base et le rôle PostgreSQL doivent être préparés séparément ;
+aucune connexion à Central ou PostgreSQL n'est testée par le questionnaire.
 
 Pour fournir votre configuration initiale plutôt que les exemples :
 

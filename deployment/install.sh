@@ -6,9 +6,11 @@ export PATH="${PATH}:/usr/sbin:/sbin"
 usage() {
     cat <<'EOF'
 Usage: bash deployment/install.sh --project NAME [options]
+       bash deployment/install.sh --interactive [--project NAME] [options]
 
 Install central-sync and prepare one project on Debian 13 (run as root).
 
+  --interactive       Ask for instance, Central, PostgreSQL and sync configuration
   --project NAME      Local instance name: lowercase letters, digits, hyphens
   --binary FILE       Local central-sync binary; otherwise reuse the installed one
   --env-file FILE     Initial .env; otherwise use the example
@@ -30,6 +32,8 @@ binary=''
 env_source="$script_dir/examples/project.env.example"
 config_source="$script_dir/examples/central_config.yaml.example"
 dry_run=false
+interactive=false
+custom_files=false
 temporary_binary=''
 trap 'if [[ -n "$temporary_binary" ]]; then rm -f -- "$temporary_binary"; fi' EXIT
 
@@ -40,15 +44,47 @@ while (($#)); do
             case "$1" in
                 --project) project=$2 ;;
                 --binary) binary=$2 ;;
-                --env-file) env_source=$2 ;;
-                --config-file) config_source=$2 ;;
+                --env-file) env_source=$2; custom_files=true ;;
+                --config-file) config_source=$2; custom_files=true ;;
             esac
             shift 2 ;;
+        --interactive) interactive=true; shift ;;
         --dry-run) dry_run=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) fail "Unknown argument: $1 (use --help)" ;;
     esac
 done
+
+# Interactive values stay in shell memory until the protected configuration is written.
+# Disable shell tracing before reading credentials, including when invoked with bash -x.
+if "$interactive"; then
+    set +x
+    "$custom_files" && fail '--interactive cannot be combined with --env-file or --config-file'
+fi
+
+ask() {
+    local label=$1 default=${2-} secret=${3-false} answer
+    while true; do
+        printf '%s' "$label" >&2
+        [[ -z "$default" ]] || printf ' [%s]' "$default" >&2
+        printf ': ' >&2
+        if "$secret"; then
+            IFS= read -rs answer || fail 'Input cancelled; configuration was not written'
+            printf '\n' >&2
+        else
+            IFS= read -r answer || fail 'Input cancelled; configuration was not written'
+        fi
+        answer=${answer:-$default}
+        [[ -n "$answer" ]] && break
+        printf 'A value is required.\n' >&2
+    done
+    REPLY=$answer
+}
+
+if "$interactive" && [[ -z "$project" ]]; then
+    ask 'Instance name (lowercase letters, digits, hyphens)'
+    project=$REPLY
+fi
 
 [[ "$project" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || fail 'Provide --project using 1–63 lowercase letters, digits or hyphens'
 config_dir="/etc/central-sync/$project"
@@ -94,6 +130,7 @@ preflight_paths
 
 if "$dry_run"; then
     info "Dry run: no files, accounts or services will be changed."
+    if "$interactive"; then info "Interactive configuration and credential prompts are skipped during dry run."; fi
     info "Binary: ${binary:-$installed_binary} -> $installed_binary"
     info "System account: central-sync"
     info "Configuration: $config_dir (existing files preserved)"
@@ -124,6 +161,136 @@ if [[ -n "$binary" ]]; then
     [[ -z "$active_units" ]] || fail 'Stop project timers and let running services finish before replacing the shared binary'
 fi
 
+ask_env() {
+    local label=$1 default=${2-} secret=${3-false}
+    while true; do
+        ask "$label" "$default" "$secret"
+        # The application's .env reader trims whitespace and boundary quotes.
+        if [[ "$REPLY" != [[:space:]\"\']* && "$REPLY" != *[[:space:]\"\'] && "$REPLY" != *$'\r'* ]]; then
+            break
+        fi
+        printf 'Leading/trailing whitespace or quotes, and carriage returns, are unsupported by the .env reader.\n' >&2
+    done
+}
+ask_identifier() {
+    while true; do
+        ask "$1" "${2-}"
+        [[ "$REPLY" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] && break
+        printf 'Use 1-63 lowercase letters, digits or underscores; start with a letter or underscore.\n' >&2
+    done
+}
+ask_yes_no() {
+    while true; do
+        ask "$1 (yes/no)" "${2-no}"
+        case "$REPLY" in
+            yes|y) REPLY=true; return ;;
+            no|n) REPLY=false; return ;;
+        esac
+    done
+}
+yaml_string() {
+    local value=${1//\'/\'\'}
+    printf "'%s'" "$value"
+}
+
+if "$interactive"; then
+    [[ ! -e "$config_dir/.env" && ! -e "$config_dir/central_config.yaml" ]] ||
+        fail 'Interactive setup is for new instances only; existing configuration is preserved. Edit the existing files directly.'
+    info 'Configure one ODK Central project. PostgreSQL must be prepared separately.'
+    while true; do
+        ask_env 'ODK Central URL (http:// or https://)'
+        central_url=$REPLY
+        [[ "$central_url" =~ ^https?://[^[:space:]]+$ ]] && break
+    done
+    ask_env 'ODK Central account email'; central_email=$REPLY
+    ask_env 'ODK Central password (hidden)' '' true; central_password=$REPLY
+    ask_env 'PostgreSQL host' localhost; pg_host=$REPLY
+    while true; do
+        ask_env 'PostgreSQL port' 5432; pg_port=$REPLY
+        [[ "$pg_port" =~ ^[1-9][0-9]{0,4}$ ]] && ((pg_port <= 65535)) && break
+    done
+    ask_env 'PostgreSQL role' centralsync; pg_user=$REPLY
+    ask_env 'PostgreSQL password (hidden)' '' true; pg_password=$REPLY
+    while true; do
+        ask_env 'PostgreSQL SSL mode (disable/allow/prefer/require/verify-ca/verify-full)' disable
+        pg_sslmode=$REPLY
+        case "$pg_sslmode" in disable|allow|prefer|require|verify-ca|verify-full) break ;; esac
+    done
+    ask_identifier 'PostgreSQL database name' "central_${project//-/_}"; database_name=$REPLY
+    while true; do
+        ask 'ODK Central project ID'; project_id=$REPLY
+        [[ "$project_id" =~ ^[1-9][0-9]{0,8}$ ]] && break
+    done
+    ask 'Project display name' "$project"; project_name=$REPLY
+    ask_yes_no 'Synchronize App Users'; sync_app_users=$REPLY
+    declare -a dataset_names=() dataset_tables=() form_ids=() form_tables=() form_modes=()
+    declare -A mapped_tables=()
+    while true; do
+        ask_yes_no 'Add a dataset'; [[ "$REPLY" == true ]] || break
+        ask 'Dataset name (exact name in Central)'; dataset_names+=("$REPLY")
+        while true; do
+            ask_identifier 'Dataset destination table'
+            [[ -z "${mapped_tables[$REPLY]+present}" ]] && break
+            printf 'This table is already mapped.\n' >&2
+        done
+        dataset_tables+=("$REPLY"); mapped_tables[$REPLY]=1
+    done
+    info 'Forms include every approval state; automatic approval and attachment downloads are disabled.'
+    while true; do
+        ask_yes_no 'Add a form'; [[ "$REPLY" == true ]] || break
+        ask 'Form XML ID (exact ID in Central)'; form_ids+=("$REPLY")
+        while true; do
+            ask_identifier 'Form destination table'
+            [[ -z "${mapped_tables[$REPLY]+present}" ]] && break
+            printf 'This table is already mapped.\n' >&2
+        done
+        form_tables+=("$REPLY"); mapped_tables[$REPLY]=1
+        while true; do
+            ask 'Form sync mode (append_only/upsert)' append_only
+            [[ "$REPLY" == append_only || "$REPLY" == upsert ]] && break
+        done
+        form_modes+=("$REPLY")
+    done
+    if [[ "$sync_app_users" == false && ${#dataset_names[@]} -eq 0 && ${#form_ids[@]} -eq 0 ]]; then
+        info "No synchronization selected. Add datasets or forms in $config_dir/central_config.yaml before starting the service."
+    fi
+fi
+
+write_interactive_config() {
+    local index
+    install -o root -g central-sync -m 0640 /dev/null "$config_dir/.env"
+    install -o root -g central-sync -m 0640 /dev/null "$config_dir/central_config.yaml"
+    {
+        printf 'ODK_CENTRAL_URL=%s\nODK_CENTRAL_USER_EMAIL=%s\nODK_CENTRAL_USER_PASSWORD=%s\n' \
+            "$central_url" "$central_email" "$central_password"
+        printf 'PG_HOST=%s\nPG_PORT=%s\nPG_USER=%s\nPG_PASSWORD=%s\nPG_SSLMODE=%s\n' \
+            "$pg_host" "$pg_port" "$pg_user" "$pg_password" "$pg_sslmode"
+    } > "$config_dir/.env"
+    {
+        printf 'attachment_storage:\n  backend: local\n  local_directory: attachments\nprojects:\n  - project_id: %s\n' "$project_id"
+        printf '    project_name: '; yaml_string "$project_name"
+        printf '\n    database_name: '; yaml_string "$database_name"
+        printf '\n    sync_app_users: %s\n' "$sync_app_users"
+        if ((${#dataset_names[@]} == 0)); then printf '    datasets: []\n'; else
+            printf '    datasets:\n'
+            for index in "${!dataset_names[@]}"; do
+                printf '      - name: '; yaml_string "${dataset_names[$index]}"
+                printf '\n        table_name: %s\n        sync: true\n' "${dataset_tables[$index]}"
+            done
+        fi
+        if ((${#form_ids[@]} == 0)); then printf '    forms: []\n'; else
+            printf '    forms:\n'
+            for index in "${!form_ids[@]}"; do
+                printf '      - xml_form_id: '; yaml_string "${form_ids[$index]}"
+                printf '\n        table_name: %s\n        sync: true\n        sync_mode: %s\n' "${form_tables[$index]}" "${form_modes[$index]}"
+                printf '        approved_only: false\n        approve_after_sync: false\n        sync_attachments: false\n'
+            done
+        fi
+    } > "$config_dir/central_config.yaml"
+    unset central_password pg_password REPLY
+    info "Created configuration in $config_dir"
+}
+
 if ! getent passwd central-sync >/dev/null; then
     adduser --system --group --no-create-home central-sync
 fi
@@ -151,8 +318,12 @@ create_config() {
         info "Created: $destination"
     fi
 }
-create_config "$env_source" "$config_dir/.env"
-create_config "$config_source" "$config_dir/central_config.yaml"
+if "$interactive"; then
+    write_interactive_config
+else
+    create_config "$env_source" "$config_dir/.env"
+    create_config "$config_source" "$config_dir/central_config.yaml"
+fi
 for name in .env central_config.yaml; do
     [[ -L "$state_dir/$name" ]] || ln -s -- "$config_dir/$name" "$state_dir/$name"
 done
