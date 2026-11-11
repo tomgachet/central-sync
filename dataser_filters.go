@@ -3,38 +3,20 @@ package main
 import "fmt"
 
 func buildDatasetFilter(lastSync *LastSuccessfulDatasetSync) string {
-	if lastSync == nil {
+	// A missing creation watermark requires a full read: new entities may
+	// have no updatedAt timestamp yet.
+	if lastSync == nil || lastSync.MaxCreatedAt == nil {
 		return ""
 	}
 
-	var parts []string
-
-	if lastSync.MaxCreatedAt != nil {
-		parts = append(parts,
-			fmt.Sprintf(
-				"__system/createdAt gt %s",
-				formatODataDateTime(*lastSync.MaxCreatedAt),
-			),
-		)
-	}
-
+	created := fmt.Sprintf("__system/createdAt gt %s", formatODataDateTime(*lastSync.MaxCreatedAt))
+	updated := "__system/updatedAt ne null"
 	if lastSync.MaxUpdatedAt != nil {
-		parts = append(parts,
-			fmt.Sprintf(
-				"__system/updatedAt gt %s",
-				formatODataDateTime(*lastSync.MaxUpdatedAt),
-			),
-		)
+		updated = fmt.Sprintf("__system/updatedAt gt %s", formatODataDateTime(*lastSync.MaxUpdatedAt))
 	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-	if len(parts) == 1 {
-		return parts[0]
-	}
-
-	return fmt.Sprintf("(%s) or (%s)", parts[0], parts[1])
+	// Until the first update watermark exists, include all updated entities,
+	// including those created before the creation watermark.
+	return fmt.Sprintf("(%s) or (%s)", created, updated)
 }
 
 func buildDeletedDatasetFilter(lastSync *LastSuccessfulDatasetSync) string {

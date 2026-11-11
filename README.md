@@ -343,6 +343,8 @@ For manual API testing, see the [`central-api-bruno`](https://github.com/tomgach
 
 For datasets, active entities are fetched when either `__system/createdAt` or `__system/updatedAt` is greater than the previous successful sync cursor. Deleted entities are fetched separately with `__system/deletedAt ne null`; after the first successful deleted-entity sync, this is narrowed to `__system/deletedAt gt <last_deleted_at>`.
 
+Until an update watermark exists, the creation predicate is combined with `__system/updatedAt ne null` so the first updates to older entities are included. Without a creation watermark, all active entities are fetched. Watermarks are maxima over successful detail history; empty runs do not reset them. After upgrading, run the normal synchronization to recover updates missed while the update watermark was null; no metadata reset or SQL migration is needed. Entity versions are still checked before writing.
+
 For form submissions, the filter depends on `sync_mode`:
 
 | Mode | Filter behavior |
