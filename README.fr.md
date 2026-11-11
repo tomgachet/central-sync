@@ -341,6 +341,8 @@ Pour tester manuellement l'API, voir le dépôt [`central-api-bruno`](https://gi
 
 Pour les datasets, les entités actives sont récupérées lorsque `__system/createdAt` ou `__system/updatedAt` est supérieur au curseur de synchronisation réussie précédent. Les entités supprimées sont récupérées séparément avec `__system/deletedAt ne null`; après la première synchronisation réussie des entités supprimées, ce filtre est restreint à `__system/deletedAt gt <last_deleted_at>`.
 
+Tant qu’aucun repère de mise à jour n’existe, le prédicat de création est combiné avec `__system/updatedAt ne null` pour inclure les premières modifications des entités anciennes. Sans repère de création, toutes les entités actives sont récupérées. Les repères sont les maxima de l’historique des détails réussis ; les exécutions vides ne les réinitialisent pas. Après installation du correctif, relancez la synchronisation habituelle pour récupérer les modifications manquées lorsque le repère de mise à jour était nul ; aucune réinitialisation des métadonnées ni migration SQL n’est nécessaire. Les versions des entités restent vérifiées avant écriture.
+
 Pour les soumissions de formulaires, le filtre dépend de `sync_mode` :
 
 | Mode | Comportement du filtre |
