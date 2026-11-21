@@ -177,9 +177,21 @@ tail -n 100 /var/log/central-sync/projet-1/central-sync.log
 ```
 
 Vérifiez les logs et `central_metadata.sync_runs` avant d'activer le timer.
-Actuellement, certaines erreurs sont journalisées sans code de sortie non nul :
-un service affiché comme réussi ne garantit pas une synchronisation réussie.
-Le statut systemd seul ne doit donc pas servir d'alerte métier.
+
+| Code de sortie | Résultat de la synchronisation | Résultat systemd |
+| --- | --- | --- |
+| `0` | Succès complet, même sans nouvelles données | Succès |
+| `1` | Succès partiel. Une partie du travail a réussi et une erreur est survenue. | Succès via `SuccessExitStatus=1` |
+| `2` | Échec au démarrage ou aucun traitement réussi, y compris lorsque tout est désactivé | Échec |
+
+Avec `SuccessExitStatus=1`, une unité en aval configurée via `OnSuccess=`
+peut se lancer après un succès complet ou partiel. Le code de sortie du binaire
+permet de distinguer ces deux résultats. Les logs et les métadonnées de
+synchronisation donnent le détail par objet.
+
+```sh
+systemctl show central-sync@projet-1.service -p Result -p ExecMainCode -p ExecMainStatus
+```
 
 ```sh
 systemctl enable --now central-sync@projet-1.timer

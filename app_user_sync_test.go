@@ -56,12 +56,15 @@ func TestSyncSingleProjectAppUsersDoesNotReconcileFailedSnapshot(t *testing.T) {
 	}
 	project := ProjectMapping{ProjectID: 7, DatabaseName: "project_db", SyncAppUsers: true}
 
-	err = syncSingleProjectAppUsers(
+	completed, err := syncSingleProjectAppUsers(
 		uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
 		db,
 		project,
 		client,
 	)
+	if completed {
+		t.Fatal("failed snapshot reported successful work")
+	}
 	if err == nil || !strings.Contains(err.Error(), "failed to decode App Users response") {
 		t.Fatalf("expected snapshot decoding error, got %v", err)
 	}

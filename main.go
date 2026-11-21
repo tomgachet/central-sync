@@ -8,17 +8,21 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
 		case "version", "--version", "-v":
 			fmt.Printf("central-sync %s\n", version)
-			return
+			return exitSuccess
 		}
 	}
 
 	if err := initLogger(); err != nil {
 		println("failed to initialize logger:", err.Error())
-		return
+		return exitFailure
 	}
 	defer func() {
 		if err := closeLogger(); err != nil {
@@ -29,7 +33,7 @@ func main() {
 	syncID, err := newSyncID()
 	if err != nil {
 		logError("startup error: %v", err)
-		return
+		return exitFailure
 	}
 
 	logInfo("central-sync started sync_id=%s version=%s", syncID, version)
@@ -37,24 +41,24 @@ func main() {
 	err = loadEnvFile(".env")
 	if err != nil {
 		logError("central-sync failed sync_id=%s environment error: %v", syncID, err)
-		return
+		return exitFailure
 	}
 
 	config, err := loadProjectConfig("central_config.yaml")
 	if err != nil {
 		logError("central-sync failed sync_id=%s configuration error: %v", syncID, err)
-		return
+		return exitFailure
 	}
 
 	if len(config.Projects) == 0 {
 		logWarn("central-sync stopped sync_id=%s: no project mapping found", syncID)
-		return
+		return exitFailure
 	}
 
 	lockSet, err := acquireSyncRunLocks(config.Projects)
 	if err != nil {
 		logError("central-sync failed sync_id=%s sync lock error: %v", syncID, err)
-		return
+		return exitFailure
 	}
 	defer func() {
 		if err := lockSet.Release(); err != nil {
@@ -65,22 +69,29 @@ func main() {
 	client, err := newCentralClient()
 	if err != nil {
 		logError("central-sync failed sync_id=%s central client error: %v", syncID, err)
-		return
+		return exitFailure
 	}
 
+	var outcome syncOutcome
 	logInfo("starting dataset sync")
-	syncAllProjects(syncID, config.Projects, client)
+	syncAllProjects(&outcome, syncID, config.Projects, client)
 	logInfo("dataset sync finished")
 
 	if hasAppUsersToSync(config.Projects) {
 		logInfo("starting App User sync")
-		syncAllAppUsers(syncID, config.Projects, client)
+		syncAllAppUsers(&outcome, syncID, config.Projects, client)
 		logInfo("App User sync finished")
 	}
 
 	logInfo("starting form sync")
-	syncAllForms(syncID, config.Projects, client, config.AttachmentStorage)
+	syncAllForms(&outcome, syncID, config.Projects, client, config.AttachmentStorage)
 	logInfo("form sync finished")
 
-	logInfo("central-sync finished sync_id=%s version=%s", syncID, version)
+	if !outcome.succeeded && !outcome.failed {
+		logWarn("central-sync sync_id=%s: no synchronization work enabled", syncID)
+	}
+
+	code := outcome.exitCode()
+	logInfo("central-sync finished sync_id=%s version=%s status=%s exit_status=%d", syncID, version, outcome.status(), code)
+	return code
 }

@@ -1,44 +1,34 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 )
 
-func syncAllProjects(syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
+func syncAllProjects(outcome *syncOutcome, syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
-		err := syncProjectDatasets(syncID, project, client)
+		err := syncProjectDatasets(outcome, syncID, project, client)
 		if err != nil {
+			outcome.record(false, err)
 			logError("[PROJECT] sync_id=%s project sync error: %v", syncID, err)
 		}
 	}
 }
 
-func syncProjectDatasets(syncID uuid.UUID, project ProjectMapping, client *CentralClient) error {
+func syncProjectDatasets(outcome *syncOutcome, syncID uuid.UUID, project ProjectMapping, client *CentralClient) error {
+	datasetsToSync := getDatasetsToSync(project)
+	if len(datasetsToSync) == 0 {
+		return nil
+	}
+
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
 	}
-
 	if !exists {
-		logWarn(
-			"[PROJECT] skipping project_id=%d project_name=%q: project does not exist in ODK Central",
-			project.ProjectID,
-			project.ProjectName,
-		)
-		return nil
-	}
-
-	datasetsToSync := getDatasetsToSync(project)
-
-	if len(datasetsToSync) == 0 {
-		logWarn(
-			"[PROJECT] skipping project_id=%d project_name=%q: no dataset to sync",
-			project.ProjectID,
-			project.ProjectName,
-		)
-		return nil
+		return fmt.Errorf("project %d (%q) does not exist in ODK Central", project.ProjectID, project.ProjectName)
 	}
 
 	logInfo(
@@ -60,7 +50,8 @@ func syncProjectDatasets(syncID uuid.UUID, project ProjectMapping, client *Centr
 	}
 
 	for _, dataset := range datasetsToSync {
-		err := syncSingleDataset(syncID, db, project, dataset, client)
+		completed, err := syncSingleDataset(syncID, db, project, dataset, client)
+		outcome.record(completed, err)
 		if err != nil {
 			logError(
 				"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s sync error: %v",
@@ -76,7 +67,7 @@ func syncProjectDatasets(syncID uuid.UUID, project ProjectMapping, client *Centr
 	return nil
 }
 
-func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) error {
+func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, dataset DatasetMapping, client *CentralClient) (bool, error) {
 	logInfo(
 		"[DATASET] sync_id=%s project_id=%d dataset=%q table=%s starting sync",
 		syncID,
@@ -87,7 +78,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 
 	lastDatasetSync, err := getLastSuccessfulDatasetSync(db, project.ProjectID, dataset.Name)
 	if err != nil {
-		return fmt.Errorf("failed to read last successful dataset sync for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("failed to read last successful dataset sync for dataset %s: %w", dataset.Name, err)
 	}
 
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
@@ -100,7 +91,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 		SyncMode:     SyncModeUpsert,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to start sync run for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("failed to start sync run for dataset %s: %w", dataset.Name, err)
 	}
 
 	logInfo(
@@ -120,7 +111,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("metadata error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("metadata error for dataset %s: %w", dataset.Name, err)
 	}
 
 	err = ensureDatasetTableExists(db, dataset.TableName)
@@ -131,7 +122,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("table error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("table error for dataset %s: %w", dataset.Name, err)
 	}
 
 	err = ensureTechnicalColumnsExist(db, dataset.TableName)
@@ -142,7 +133,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("technical column error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("technical column error for dataset %s: %w", dataset.Name, err)
 	}
 
 	err = ensureDatasetPropertyColumnsExist(db, dataset.TableName, metadata.Properties)
@@ -153,7 +144,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("property column error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("property column error for dataset %s: %w", dataset.Name, err)
 	}
 
 	filter := buildDatasetFilter(lastDatasetSync)
@@ -175,7 +166,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("entities error for dataset %s: %w", dataset.Name, err)
 	}
 
 	deletedFilter := buildDeletedDatasetFilter(lastDatasetSync)
@@ -195,7 +186,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("deleted entities error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("deleted entities error for dataset %s: %w", dataset.Name, err)
 	}
 
 	entities = mergeDatasetEntitiesByID(entities, deletedEntities)
@@ -218,7 +209,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("dataset GeoJSON error for dataset %s: %w", dataset.Name, err)
+		return false, fmt.Errorf("dataset GeoJSON error for dataset %s: %w", dataset.Name, err)
 	}
 
 	geometryGeoJSONByEntityID := buildGeometryGeoJSONMap(geojsonCollection)
@@ -234,21 +225,14 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 		geometryGeoJSONByEntityID,
 	)
 
-	finalStatus := "success"
+	completed := syncErr == nil || stats.RowsInserted+stats.RowsUpdated+stats.RowsSkipped > 0
+
+	finalStatus := (syncOutcome{succeeded: completed, failed: syncErr != nil}).status()
 	var finalErrorMessage *string
 
 	if syncErr != nil {
-		finalStatus = "partial_success"
 		msg := syncErr.Error()
 		finalErrorMessage = &msg
-		logWarn(
-			"[DATASET] sync_id=%s project_id=%d dataset=%q run_id=%d partial success: %v",
-			syncID,
-			project.ProjectID,
-			dataset.Name,
-			syncRunID,
-			syncErr,
-		)
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
@@ -262,7 +246,7 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 		ErrorMessage: finalErrorMessage,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to finalize sync run for dataset %s: %w", dataset.Name, err)
+		return completed, errors.Join(syncErr, fmt.Errorf("failed to finalize sync run for dataset %s: %w", dataset.Name, err))
 	}
 
 	logInfo(
@@ -280,5 +264,5 @@ func syncSingleDataset(syncID uuid.UUID, db DBExecutor, project ProjectMapping, 
 		stats.RowsFailed,
 	)
 
-	return nil
+	return completed, syncErr
 }

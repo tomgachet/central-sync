@@ -5,6 +5,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=1
 User=central-sync
 Group=central-sync
 WorkingDirectory=/var/lib/central-sync/%i

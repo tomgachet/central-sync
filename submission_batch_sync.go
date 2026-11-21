@@ -17,6 +17,8 @@ type PendingSubmissionDetail struct {
 	RowsSkipped    int
 }
 
+// syncSubmissionBatch reports whether the submission transaction committed,
+// even when post-commit work returns an error.
 func syncSubmissionBatch(
 	db *sql.DB,
 	client *CentralClient,
@@ -28,14 +30,14 @@ func syncSubmissionBatch(
 	syncAttachments bool,
 	attachmentStorage AttachmentStorage,
 	batch *SubmissionBatch,
-) (*SyncStats, error) {
+) (*SyncStats, bool, error) {
 	stats := &SyncStats{
 		RowsFetched: len(batch.Rows),
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction for submission %s: %w", batch.RootSubmissionUUID, err)
+		return nil, false, fmt.Errorf("failed to begin transaction for submission %s: %w", batch.RootSubmissionUUID, err)
 	}
 
 	var pendingDetails []PendingSubmissionDetail
@@ -73,7 +75,7 @@ func syncSubmissionBatch(
 				ErrorMessage:          &errorMessage,
 			})
 
-			return stats, fmt.Errorf(
+			return stats, false, fmt.Errorf(
 				"failed to sync submission %s on table %s: %w",
 				batch.RootSubmissionUUID,
 				rowRef.FormTable.ODataName,
@@ -108,7 +110,7 @@ func syncSubmissionBatch(
 	}
 
 	if err := tx.Commit(); err != nil {
-		return stats, fmt.Errorf("failed to commit submission %s: %w", batch.RootSubmissionUUID, err)
+		return stats, false, fmt.Errorf("failed to commit submission %s: %w", batch.RootSubmissionUUID, err)
 	}
 
 	if syncAttachments {
@@ -146,7 +148,7 @@ func syncSubmissionBatch(
 				ErrorMessage:   &errorMessage,
 			})
 
-			return stats, fmt.Errorf("submission %s synced in database but attachment sync failed: %w", batch.RootSubmissionUUID, err)
+			return stats, true, fmt.Errorf("submission %s synced in database but attachment sync failed: %w", batch.RootSubmissionUUID, err)
 		}
 
 		for _, attachment := range result.Stored {
@@ -214,7 +216,7 @@ func syncSubmissionBatch(
 				ErrorMessage:   &errorMessage,
 			})
 
-			return stats, fmt.Errorf(
+			return stats, true, fmt.Errorf(
 				"submission %s synced in database but approval failed: %w",
 				batch.RootSubmissionUUID,
 				err,
@@ -240,7 +242,7 @@ func syncSubmissionBatch(
 				ErrorMessage:   &errorMessage,
 			})
 
-			return stats, fmt.Errorf(
+			return stats, true, fmt.Errorf(
 				"submission %s approved but sync comment failed: %w",
 				batch.RootSubmissionUUID,
 				err,
@@ -267,9 +269,9 @@ func syncSubmissionBatch(
 			RowsSkipped:           detail.RowsSkipped,
 		})
 		if err != nil {
-			return stats, err
+			return stats, true, err
 		}
 	}
 
-	return stats, nil
+	return stats, true, nil
 }
