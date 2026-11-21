@@ -2,12 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 )
 
 func syncAllForms(
+	outcome *syncOutcome,
 	syncID uuid.UUID,
 	projects []ProjectMapping,
 	client *CentralClient,
@@ -16,46 +18,37 @@ func syncAllForms(
 	attachmentStorage, err := configuredAttachmentStorage(projects, storageConfig)
 	if err != nil {
 		logError("[FORM] sync_id=%s attachment storage error: %v", syncID, err)
-		return
+		outcome.record(false, err)
+		attachmentStorage = nil
 	}
 
 	for _, project := range projects {
-		err := syncProjectForms(syncID, project, client, attachmentStorage)
+		err := syncProjectForms(outcome, syncID, project, client, attachmentStorage)
 		if err != nil {
+			outcome.record(false, err)
 			logError("[PROJECT] sync_id=%s form sync error: %v", syncID, err)
 		}
 	}
 }
 
 func syncProjectForms(
+	outcome *syncOutcome,
 	syncID uuid.UUID,
 	project ProjectMapping,
 	client *CentralClient,
 	attachmentStorage AttachmentStorage,
 ) error {
+	formsToSync := getFormsToSync(project)
+	if len(formsToSync) == 0 {
+		return nil
+	}
+
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
 		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
 	}
-
 	if !exists {
-		logWarn(
-			"[PROJECT] skipping form sync for project_id=%d project_name=%q: project does not exist in ODK Central",
-			project.ProjectID,
-			project.ProjectName,
-		)
-		return nil
-	}
-
-	formsToSync := getFormsToSync(project)
-
-	if len(formsToSync) == 0 {
-		logWarn(
-			"[PROJECT] skipping form sync for project_id=%d project_name=%q: no form to sync",
-			project.ProjectID,
-			project.ProjectName,
-		)
-		return nil
+		return fmt.Errorf("project %d (%q) does not exist in ODK Central", project.ProjectID, project.ProjectName)
 	}
 
 	logInfo(
@@ -77,7 +70,8 @@ func syncProjectForms(
 	}
 
 	for _, form := range formsToSync {
-		err := syncSingleForm(syncID, db, project, form, client, attachmentStorage)
+		completed, err := syncSingleForm(syncID, db, project, form, client, attachmentStorage)
+		outcome.record(completed, err)
 		if err != nil {
 			logError(
 				"[FORM] sync_id=%s project_id=%d form=%q table=%s sync error: %v",
@@ -100,7 +94,7 @@ func syncSingleForm(
 	form FormMapping,
 	client *CentralClient,
 	attachmentStorage AttachmentStorage,
-) error {
+) (bool, error) {
 	logInfo(
 		"[FORM] sync_id=%s project_id=%d form=%q table=%s mode=%s starting sync",
 		syncID,
@@ -112,35 +106,35 @@ func syncSingleForm(
 
 	exists, err := formExists(client, project.ProjectID, form.XMLFormID)
 	if err != nil {
-		return fmt.Errorf("failed to validate form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to validate form %s: %w", form.XMLFormID, err)
 	}
 
 	if !exists {
-		return fmt.Errorf("form %s does not exist in ODK Central", form.XMLFormID)
+		return false, fmt.Errorf("form %s does not exist in ODK Central", form.XMLFormID)
 	}
 
 	if shouldSyncAttachments(form) {
 		if attachmentStorage == nil {
-			return fmt.Errorf("attachment storage is not configured for form %s", form.XMLFormID)
+			return false, fmt.Errorf("attachment storage is not configured for form %s", form.XMLFormID)
 		}
 		if err := requireSubmissionAttachmentMetadataTable(db); err != nil {
-			return fmt.Errorf("attachment metadata table error for form %s: %w", form.XMLFormID, err)
+			return false, fmt.Errorf("attachment metadata table error for form %s: %w", form.XMLFormID, err)
 		}
 	}
 
 	formTables, err := getFormTables(client, project.ProjectID, form.XMLFormID, form.TableName)
 	if err != nil {
-		return fmt.Errorf("failed to discover OData tables for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to discover OData tables for form %s: %w", form.XMLFormID, err)
 	}
 
 	doc, err := getFormMetadataDocument(client, project.ProjectID, form.XMLFormID)
 	if err != nil {
-		return fmt.Errorf("failed to load metadata for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to load metadata for form %s: %w", form.XMLFormID, err)
 	}
 
 	parsedMetadata, err := parseFormMetadata(doc, formTables)
 	if err != nil {
-		return fmt.Errorf("failed to parse metadata for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to parse metadata for form %s: %w", form.XMLFormID, err)
 	}
 
 	syncMode := getFormSyncMode(form)
@@ -149,12 +143,12 @@ func syncSingleForm(
 
 	lastSubmissionSync, err := getLastSuccessfulSubmissionSync(db, project.ProjectID, form.XMLFormID)
 	if err != nil {
-		return fmt.Errorf("failed to read last successful submissions sync for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to read last successful submissions sync for form %s: %w", form.XMLFormID, err)
 	}
 
 	failedSubmissions, err := getLastFailedSubmissions(db, project.ProjectID, form.XMLFormID)
 	if err != nil {
-		return fmt.Errorf("failed to read failed submissions for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to read failed submissions for form %s: %w", form.XMLFormID, err)
 	}
 	failedSubmissionUUIDs := extractFailedSubmissionUUIDs(failedSubmissions)
 
@@ -166,7 +160,7 @@ func syncSingleForm(
 		failedSubmissionUUIDs,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to fetch failed submission rows for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to fetch failed submission rows for form %s: %w", form.XMLFormID, err)
 	}
 
 	syncRunID, err := startSyncRun(db, SyncRunStartParams{
@@ -179,7 +173,7 @@ func syncSingleForm(
 		SyncMode:     syncMode,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to start sync run for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to start sync run for form %s: %w", form.XMLFormID, err)
 	}
 
 	logInfo(
@@ -205,7 +199,7 @@ func syncSingleForm(
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf("%s", errorMessage)
+			return false, fmt.Errorf("%s", errorMessage)
 		}
 
 		err = ensureSubmissionTableExists(db, formTable)
@@ -216,7 +210,7 @@ func syncSingleForm(
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf("submission table error for form table %s: %w", formTable.ODataName, err)
+			return false, fmt.Errorf("submission table error for form table %s: %w", formTable.ODataName, err)
 		}
 
 		err = ensureSubmissionTechnicalColumnsExist(db, formTable)
@@ -227,7 +221,7 @@ func syncSingleForm(
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf("submission technical column error for form table %s: %w", formTable.ODataName, err)
+			return false, fmt.Errorf("submission technical column error for form table %s: %w", formTable.ODataName, err)
 		}
 
 		err = ensureSubmissionPropertyColumnsExist(db, formTable, tableSchema)
@@ -238,7 +232,7 @@ func syncSingleForm(
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
+			return false, fmt.Errorf("submission property column error for form table %s: %w", formTable.ODataName, err)
 		}
 
 		filter := ""
@@ -273,7 +267,7 @@ func syncSingleForm(
 				SyncStatus:   "failed",
 				ErrorMessage: &errorMessage,
 			})
-			return fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
+			return false, fmt.Errorf("failed to fetch rows for form table %s: %w", formTable.ODataName, err)
 		}
 
 		filteredCount := len(rows)
@@ -313,7 +307,7 @@ func syncSingleForm(
 			SyncStatus:   "failed",
 			ErrorMessage: &errorMessage,
 		})
-		return fmt.Errorf("failed to build submission batches for form %s: %w", form.XMLFormID, err)
+		return false, fmt.Errorf("failed to build submission batches for form %s: %w", form.XMLFormID, err)
 	}
 
 	logInfo(
@@ -325,11 +319,11 @@ func syncSingleForm(
 	)
 
 	var totalStats SyncStats
-	hadFailure := false
-	var firstErrorMessage *string
+	completed := len(batches) == 0
+	var firstErr error
 
 	for _, batch := range batches {
-		batchStats, err := syncSubmissionBatch(
+		batchStats, committed, err := syncSubmissionBatch(
 			db,
 			client,
 			syncRunID,
@@ -356,12 +350,11 @@ func syncSingleForm(
 			totalStats.SyncOutUpdatedAt = maxTimePtr(totalStats.SyncOutUpdatedAt, batchStats.SyncOutUpdatedAt)
 		}
 
+		completed = completed || committed
 		if err != nil {
 			totalStats.RowsFailed++
-			hadFailure = true
-			msg := err.Error()
-			if firstErrorMessage == nil {
-				firstErrorMessage = &msg
+			if firstErr == nil {
+				firstErr = err
 			}
 			logError(
 				"[FORM] sync_id=%s project_id=%d form=%q run_id=%d submission_uuid=%s batch sync error: %v",
@@ -372,13 +365,14 @@ func syncSingleForm(
 				batch.RootSubmissionUUID,
 				err,
 			)
-			continue
 		}
 	}
 
-	finalStatus := "success"
-	if hadFailure {
-		finalStatus = "partial_success"
+	finalStatus := (syncOutcome{succeeded: completed, failed: firstErr != nil}).status()
+	var firstErrorMessage *string
+	if firstErr != nil {
+		message := firstErr.Error()
+		firstErrorMessage = &message
 	}
 
 	err = finishSyncRun(db, SyncRunFinishParams{
@@ -396,7 +390,7 @@ func syncSingleForm(
 		ErrorMessage:        firstErrorMessage,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to finalize sync run for form %s: %w", form.XMLFormID, err)
+		return completed, errors.Join(firstErr, fmt.Errorf("failed to finalize sync run for form %s: %w", form.XMLFormID, err))
 	}
 
 	logInfo(
@@ -419,5 +413,5 @@ func syncSingleForm(
 		totalStats.AttachmentsFailed,
 	)
 
-	return nil
+	return completed, firstErr
 }

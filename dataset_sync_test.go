@@ -2,9 +2,92 @@ package main
 
 import (
 	"database/sql"
-	"github.com/DATA-DOG/go-sqlmock"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 )
+
+func TestSyncSingleDatasetOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		entities   string
+		inserted   int
+		failed     int
+		wantStatus string
+		wantExit   int
+	}{
+		{"no new entities", "", 0, 0, "success", 0},
+		{"one invalid entity", `{"__id":"invalid"},{"__id":"valid","__system":{"version":1}}`, 1, 1, "partial_success", 1},
+		{"all entities invalid", `{"__id":"invalid"}`, 0, 1, "failed", 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.MatchExpectationsInOrder(false)
+
+			mock.ExpectQuery("FROM .*last_successful_datasets_sync").WillReturnError(sql.ErrNoRows)
+			mock.ExpectQuery(`INSERT INTO "central_metadata"\.sync_runs .*RETURNING run_id`).
+				WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow(42))
+			mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "central_datasets"\."etudes"`).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			for range 8 {
+				mock.ExpectQuery("FROM information_schema.columns").
+					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			}
+			if test.inserted > 0 {
+				mock.ExpectQuery("SELECT central_version, central_deleted_at").WithArgs("valid").
+					WillReturnError(sql.ErrNoRows)
+				mock.ExpectExec(`INSERT INTO "central_datasets"\."etudes"`).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			for range test.inserted + test.failed {
+				mock.ExpectExec(`INSERT INTO "central_metadata"\.sync_runs_detail`).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			mock.ExpectExec(`UPDATE "central_metadata"\.sync_runs`).
+				WithArgs(42, sqlmock.AnyArg(), test.wantStatus, test.inserted+test.failed, test.inserted,
+					0, 0, test.failed, 0, 0, 0, 0, sqlmock.AnyArg()).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/projects/7/datasets/etudes":
+					fmt.Fprint(w, `{"properties":[]}`)
+				case "/v1/projects/7/datasets/etudes.svc/Entities":
+					entities := test.entities
+					if r.URL.Query().Get("$filter") != "" {
+						entities = ""
+					}
+					fmt.Fprintf(w, `{"value":[%s]}`, entities)
+				case "/v1/projects/7/datasets/etudes/entities.geojson":
+					fmt.Fprint(w, `{"type":"FeatureCollection","features":[]}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client := &CentralClient{BaseURL: server.URL, HTTPClient: server.Client()}
+			project := ProjectMapping{ProjectID: 7}
+			dataset := DatasetMapping{Name: "etudes", TableName: "etudes"}
+			completed, err := syncSingleDataset(uuid.New(), db, project, dataset, client)
+			if mockErr := mock.ExpectationsWereMet(); mockErr != nil {
+				t.Fatalf("%v (sync error: %v)", mockErr, err)
+			}
+			var outcome syncOutcome
+			outcome.record(completed, err)
+			if got := outcome.exitCode(); got != test.wantExit {
+				t.Fatalf("exit status = %d, want %d (completed = %t, err = %v)", got, test.wantExit, completed, err)
+			}
+		})
+	}
+}
 
 func TestDatasetEntityVersionAndDeletion(t *testing.T) {
 	for _, tt := range []struct {

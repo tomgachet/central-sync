@@ -7,12 +7,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func syncAllAppUsers(syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
+func syncAllAppUsers(outcome *syncOutcome, syncID uuid.UUID, projects []ProjectMapping, client *CentralClient) {
 	for _, project := range projects {
 		if !project.SyncAppUsers {
 			continue
 		}
-		if err := syncProjectAppUsers(syncID, project, client); err != nil {
+		completed, err := syncProjectAppUsers(syncID, project, client)
+		outcome.record(completed, err)
+		if err != nil {
 			logError(
 				"[APP_USER] sync_id=%s project_id=%d sync error: %v",
 				syncID,
@@ -27,28 +29,23 @@ func syncProjectAppUsers(
 	syncID uuid.UUID,
 	project ProjectMapping,
 	client *CentralClient,
-) error {
+) (bool, error) {
 	exists, err := projectExists(client, project.ProjectID)
 	if err != nil {
-		return fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
+		return false, fmt.Errorf("failed to validate project %d: %w", project.ProjectID, err)
 	}
 	if !exists {
-		logWarn(
-			"[APP_USER] skipping project_id=%d project_name=%q: project does not exist in ODK Central",
-			project.ProjectID,
-			project.ProjectName,
-		)
-		return nil
+		return false, fmt.Errorf("project %d (%q) does not exist in ODK Central", project.ProjectID, project.ProjectName)
 	}
 
 	db, err := connectProjectDatabase(project.DatabaseName)
 	if err != nil {
-		return fmt.Errorf("database connection error for project %d: %w", project.ProjectID, err)
+		return false, fmt.Errorf("database connection error for project %d: %w", project.ProjectID, err)
 	}
 	defer db.Close()
 
 	if err := requireSchema(db, appUserSchema); err != nil {
-		return fmt.Errorf("App User schema error for project %d: %w", project.ProjectID, err)
+		return false, fmt.Errorf("App User schema error for project %d: %w", project.ProjectID, err)
 	}
 
 	return syncSingleProjectAppUsers(syncID, db, project, client)
@@ -59,7 +56,7 @@ func syncSingleProjectAppUsers(
 	db *sql.DB,
 	project ProjectMapping,
 	client *CentralClient,
-) error {
+) (bool, error) {
 	runID, err := startSyncRun(db, SyncRunStartParams{
 		SyncID:       syncID,
 		ProjectID:    project.ProjectID,
@@ -69,7 +66,7 @@ func syncSingleProjectAppUsers(
 		SyncMode:     SyncModeUpsert,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to start App User sync run: %w", err)
+		return false, fmt.Errorf("failed to start App User sync run: %w", err)
 	}
 
 	logInfo(
@@ -81,12 +78,12 @@ func syncSingleProjectAppUsers(
 
 	appUsers, err := listProjectAppUsers(client, project.ProjectID)
 	if err != nil {
-		return finishFailedAppUserRun(db, runID, 0, err)
+		return false, finishFailedAppUserRun(db, runID, 0, err)
 	}
 
 	results, err := reconcileProjectAppUsers(db, runID, project.ProjectID, appUsers)
 	if err != nil {
-		return finishFailedAppUserRun(db, runID, len(appUsers), err)
+		return false, finishFailedAppUserRun(db, runID, len(appUsers), err)
 	}
 
 	stats := summarizeAppUserResults(len(appUsers), results)
@@ -98,7 +95,7 @@ func syncSingleProjectAppUsers(
 		RowsUpdated:  stats.RowsUpdated,
 		RowsSkipped:  stats.RowsSkipped,
 	}); err != nil {
-		return fmt.Errorf("failed to finish App User sync run %d: %w", runID, err)
+		return true, fmt.Errorf("failed to finish App User sync run %d: %w", runID, err)
 	}
 
 	logInfo(
@@ -112,7 +109,7 @@ func syncSingleProjectAppUsers(
 		stats.RowsSkipped,
 		countAppUserActions(results, AppUserActionMarkedMissing),
 	)
-	return nil
+	return true, nil
 }
 
 func finishFailedAppUserRun(db *sql.DB, runID int64, rowsFetched int, syncErr error) error {

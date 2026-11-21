@@ -167,9 +167,20 @@ tail -n 100 /var/log/central-sync/projet-1/central-sync.log
 ```
 
 Check the logs and `central_metadata.sync_runs` before enabling the timer.
-Currently some errors are logged without a nonzero process exit code. A successful
-systemd status does not guarantee a successful synchronization and should not be
-the sole source of operational alerts.
+
+| Exit code | Synchronization result | systemd result |
+| --- | --- | --- |
+| `0` | Full success, including runs with no new data | Success |
+| `1` | Partial success. Some work succeeded and an error occurred. | Success via `SuccessExitStatus=1` |
+| `2` | Startup failed or no work succeeded, including when all work is disabled | Failure |
+
+With `SuccessExitStatus=1`, a downstream unit configured with `OnSuccess=` can
+run after full or partial success. To distinguish those results, check the
+process exit status and use the logs and synchronization metadata for details.
+
+```sh
+systemctl show central-sync@projet-1.service -p Result -p ExecMainCode -p ExecMainStatus
+```
 
 ```sh
 systemctl enable --now central-sync@projet-1.timer
